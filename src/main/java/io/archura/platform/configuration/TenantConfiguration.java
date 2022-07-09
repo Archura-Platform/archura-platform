@@ -6,9 +6,9 @@ import lombok.Data;
 import java.util.List;
 
 @Data
-public class TenantConfiguration {
+public class TenantConfiguration implements FilterConfiguration {
 
-    private List<PreFilter> preFilters;
-    private List<PostFilter> postFilters;
+    private List<PreFilter> pre;
+    private List<PostFilter> post;
 
 }

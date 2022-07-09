@@ -1,15 +1,19 @@
 package io.archura.platform;
 
+import com.fasterxml.jackson.core.JacksonException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.archura.platform.configuration.Configuration;
 import io.archura.platform.configuration.EnvironmentConfiguration;
-import io.archura.platform.configuration.Function;
+import io.archura.platform.configuration.FilterConfiguration;
+import io.archura.platform.configuration.FunctionConfiguration;
 import io.archura.platform.configuration.FunctionsConfiguration;
 import io.archura.platform.configuration.GlobalConfiguration;
 import io.archura.platform.configuration.PostFilter;
 import io.archura.platform.configuration.PreFilter;
 import io.archura.platform.configuration.TenantConfiguration;
-import io.archura.platform.exception.MissingResourceException;
+import io.archura.platform.exception.JsonReadException;
 import io.archura.platform.exception.ResourceLoadException;
+import org.reactivestreams.Subscriber;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -27,21 +31,14 @@ import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.io.File;
-import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.nio.charset.StandardCharsets;
-import java.util.AbstractMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Scanner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 import static java.util.Objects.isNull;
 
@@ -85,40 +82,225 @@ public class ArchuraPlatformApplication {
     ) {
         return RouterFunctions.route()
                 .before(request -> {
-//                    getGlobalPreFilters()
-//                            .doOnNext(serverRequestConsumer -> serverRequestConsumer.accept(request))
-
+                    getGlobalPreFilters()
+                            .doOnNext(serverRequestConsumer -> serverRequestConsumer.accept(request))
+                            .subscribe();
 
                     String environmentName = request.attribute("ENVIRONMENT").map(String::valueOf).orElse(DEFAULT_ENVIRONMENT);
-                    getEnvironmentPreFilters(environmentName).forEach(c -> c.accept(request));
-
+                    getEnvironmentPreFilters(environmentName)
+                            .doOnNext(serverRequestConsumer -> serverRequestConsumer.accept(request))
+                            .subscribe();
+//
                     String tenantId = request.attribute("TENANT_ID").map(String::valueOf).orElse(DEFAULT_TENANT_ID);
-                    getTenantPreFilters(environmentName, tenantId).forEach(c -> c.accept(request));
+                    getTenantPreFilters(environmentName, tenantId)
+                            .doOnNext(serverRequestConsumer -> serverRequestConsumer.accept(request))
+                            .subscribe();
 
                     return request;
                 })
                 .route(RequestPredicates.all(), request -> {
-                    getGlobalPreFilters()
-                            .doOnNext(serverRequestConsumer -> serverRequestConsumer.accept(request))
+                    final String environmentName = request.attribute("ENVIRONMENT").map(String::valueOf).orElse(DEFAULT_ENVIRONMENT);
+                    final String tenantId = request.attribute("TENANT_ID").map(String::valueOf).orElse(DEFAULT_TENANT_ID);
+                    final String routeId = request.attribute("ROUTE_ID").map(String::valueOf).orElse(CATCH_ALL_KEY);
 
-
-                    final String routeId = request.attribute("ROUTE_ID")
-                            .map(String::valueOf)
-                            .orElse(CATCH_ALL_KEY);
-                    return getTenantFunctions(request)
-                            .getOrDefault(routeId, r -> ServerResponse.notFound().build())
-                            .handle(request);
+                    return getTenantFunctions(environmentName, tenantId, routeId)
+                            .flatMap(function -> function.handle(request));
                 })
                 .after((request, response) -> {
                     String environmentName = request.attribute("ENVIRONMENT").map(String::valueOf).orElse(DEFAULT_ENVIRONMENT);
                     String tenantId = request.attribute("TENANT_ID").map(String::valueOf).orElse(DEFAULT_TENANT_ID);
-                    getTenantPostFilters(environmentName, tenantId).forEach(bc -> bc.accept(request, response));
-                    getEnvironmentPostFilters(environmentName).forEach(bc -> bc.accept(request, response));
-                    getGlobalPostFilters().forEach(bc -> bc.accept(request, response));
+
+                    getTenantPostFilters(environmentName, tenantId)
+                            .doOnNext(bc -> bc.accept(request, response))
+                            .subscribe();
+
+                    getEnvironmentPostFilters(environmentName)
+                            .doOnNext(bc -> bc.accept(request, response))
+                            .subscribe();
+
+                    getGlobalPostFilters()
+                            .doOnNext(bc -> bc.accept(request, response))
+                            .subscribe();
                     return response;
                 })
                 .onError(Throwable.class, this::getErrorResponse)
                 .build();
+    }
+
+    private Flux<Consumer<ServerRequest>> getGlobalPreFilters() {
+        if (isNull(configuration.getGlobalConfiguration())) {
+            final String globalFiltersUrl = String.format("%s/global/filters.json", configRepositoryUrl);
+            return Flux.from(subscriber ->
+                    fetchConfiguration(globalFiltersUrl, GlobalConfiguration.class)
+                            .subscribe(filterConfig -> {
+                                configuration.setGlobalConfiguration(filterConfig);
+                                subscribePreFilter(filterConfig, subscriber);
+                            }));
+        } else {
+            return Flux.from(subscriber -> subscribePreFilter(configuration.getGlobalConfiguration(), subscriber));
+        }
+    }
+
+    private Flux<Consumer<ServerRequest>> getEnvironmentPreFilters(String environmentName) {
+        if (isNull(configuration.getEnvironmentConfigurations().get(environmentName))) {
+            final String environmentFiltersURL = String.format("%s/environments/%s/filters.json", configRepositoryUrl, environmentName);
+            return Flux.from(subscriber ->
+                    fetchConfiguration(environmentFiltersURL, EnvironmentConfiguration.class)
+                            .subscribe(filterConfig -> {
+                                configuration.getEnvironmentConfigurations().put(environmentName, filterConfig);
+                                subscribePreFilter(filterConfig, subscriber);
+                            }));
+        } else {
+            return Flux.from(subscriber -> subscribePreFilter(configuration.getEnvironmentConfigurations().get(environmentName), subscriber));
+        }
+    }
+
+    private Flux<Consumer<ServerRequest>> getTenantPreFilters(String environmentName, String tenantId) {
+        if (!configuration.getEnvironmentConfigurations().containsKey(environmentName)) {
+            return Flux.empty();
+        }
+        final EnvironmentConfiguration environmentConfiguration = configuration.getEnvironmentConfigurations().get(environmentName);
+        final Map<String, TenantConfiguration> tenantConfigurations = environmentConfiguration.getTenantConfigurations();
+        final TenantConfiguration tenantConfiguration = tenantConfigurations.get(tenantId);
+        if (isNull(tenantConfiguration)) {
+            String tenantFiltersURL = String.format("%s/environments/%s/tenants/%s/filters.json", configRepositoryUrl, environmentName, tenantId);
+            return Flux.from(subscriber ->
+                    fetchConfiguration(tenantFiltersURL, TenantConfiguration.class)
+                            .subscribe(filterConfig -> {
+                                tenantConfigurations.put(tenantId, filterConfig);
+                                subscribePreFilter(filterConfig, subscriber);
+                            }));
+        } else {
+            return Flux.from(subscriber -> subscribePreFilter(tenantConfiguration, subscriber));
+        }
+    }
+
+    private <T> Mono<T> fetchConfiguration(String url, Class<T> valueType) {
+        System.out.println("url = " + url);
+        return WebClient.create()
+                .get()
+                .uri(URI.create(url))
+                .header(X_A_HEADER_KEY_PLATFORM_TOKEN, platformToken)
+                .exchangeToMono(clientResponse -> clientResponse.bodyToMono(String.class))
+                .doOnError(Throwable.class, throwable -> System.out.println("throwable = " + throwable))
+                .map(response -> readFilterConfiguration(valueType, response));
+    }
+
+    private <T> T readFilterConfiguration(Class<T> valueType, String response) {
+        final ObjectMapper objectMapper = new ObjectMapper();
+        try {
+            return objectMapper.readValue(response, valueType);
+        } catch (JacksonException e) {
+            throw new JsonReadException(e);
+        }
+    }
+
+    private void subscribePreFilter(FilterConfiguration filterConfiguration, Subscriber<? super Consumer<ServerRequest>> subscriber) {
+        filterConfiguration.getPre()
+                .stream()
+                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter))
+                .forEach(subscriber::onNext);
+    }
+
+    private Consumer<ServerRequest> getPreFilter(String codeServerURL, PreFilter preFilter) {
+        String filterURL = String.format("%s/%s-%s.jar", codeServerURL, preFilter.getName(), preFilter.getVersion());
+        if (!preFilterMap.containsKey(filterURL)) {
+            System.out.println("getPreFilter filterURL = " + filterURL);
+            try {
+                final URL url = URI.create(filterURL).toURL();
+                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
+                final Class<Consumer<ServerRequest>> classToLoad = (Class<Consumer<ServerRequest>>) Class.forName(preFilter.getName(), true, classLoader);
+                final Consumer<ServerRequest> filter = classToLoad.getDeclaredConstructor().newInstance();
+                preFilterMap.put(filterURL, filter);
+            } catch (Exception e) {
+                throw new ResourceLoadException(e);
+            }
+        }
+        return preFilterMap.get(filterURL);
+    }
+
+    private Mono<HandlerFunction<ServerResponse>> getTenantFunctions(final String environmentName, final String tenantId, final String routeId) {
+        if (isNull(configuration.getFunctionsConfiguration().getRouteFunctions().get(routeId))) {
+            String tenantFunctionsURL = String.format("%s/environments/%s/tenants/%s/functions.json", configRepositoryUrl, environmentName, tenantId);
+            System.out.println("tenantFunctionsURL = " + tenantFunctionsURL);
+            return fetchConfiguration(tenantFunctionsURL, FunctionsConfiguration.class)
+                    .doOnNext(functionsConfiguration -> configuration.setFunctionsConfiguration(functionsConfiguration))
+                    .filter(functionsConfiguration -> functionsConfiguration.getRouteFunctions().containsKey(routeId))
+                    .map(functionsConfiguration -> functionsConfiguration.getRouteFunctions().get(routeId))
+                    .map(functionConfiguration -> getFunction(codeRepositoryUrl, functionConfiguration))
+                    .switchIfEmpty(Mono.just(request -> ServerResponse.notFound().build()));
+        } else {
+            if (configuration.getFunctionsConfiguration().getRouteFunctions().containsKey(routeId)) {
+                final FunctionConfiguration functionConfiguration = configuration.getFunctionsConfiguration().getRouteFunctions().get(routeId);
+                return Mono.just(getFunction(codeRepositoryUrl, functionConfiguration));
+            } else {
+                return Mono.just(request -> ServerResponse.notFound().build());
+            }
+        }
+    }
+
+    private HandlerFunction<ServerResponse> getFunction(String codeServerURL, FunctionConfiguration functionConfiguration) {
+        String functionURL = String.format("%s/%s-%s.jar", codeServerURL, functionConfiguration.getName(), functionConfiguration.getVersion());
+        if (!functionMap.containsKey(functionURL)) {
+            System.out.println("getFunction functionURL = " + functionURL);
+            try {
+                final URL url = URI.create(functionURL).toURL();
+                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
+                final Class<HandlerFunction<ServerResponse>> classToLoad = (Class<HandlerFunction<ServerResponse>>) Class.forName(functionConfiguration.getName(), true, classLoader);
+                final HandlerFunction<ServerResponse> handlerFunction = classToLoad.getDeclaredConstructor().newInstance();
+                functionMap.put(functionURL, handlerFunction);
+            } catch (Exception e) {
+                throw new ResourceLoadException(e);
+            }
+        }
+        return functionMap.get(functionURL);
+    }
+
+    private Flux<BiConsumer<ServerRequest, ServerResponse>> getGlobalPostFilters() {
+        return Flux.from(subscriber -> subscribePostFilter(configuration.getGlobalConfiguration(), subscriber));
+    }
+
+    private Flux<BiConsumer<ServerRequest, ServerResponse>> getEnvironmentPostFilters(String environmentName) {
+        if (configuration.getEnvironmentConfigurations().containsKey(environmentName)) {
+            return Flux.from(subscriber -> subscribePostFilter(configuration.getEnvironmentConfigurations().get(environmentName), subscriber));
+        } else {
+            return Flux.empty();
+        }
+    }
+
+    private Flux<BiConsumer<ServerRequest, ServerResponse>> getTenantPostFilters(String environmentName, String tenantId) {
+        if (configuration.getEnvironmentConfigurations().containsKey(environmentName) &&
+                configuration.getEnvironmentConfigurations().get(environmentName).getTenantConfigurations().containsKey(tenantId)) {
+            final EnvironmentConfiguration environmentConfiguration = configuration.getEnvironmentConfigurations().get(environmentName);
+            final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenantConfigurations().get(tenantId);
+            return Flux.from(subscriber -> subscribePostFilter(tenantConfiguration, subscriber));
+        } else {
+            return Flux.empty();
+        }
+    }
+
+    private void subscribePostFilter(FilterConfiguration filterConfiguration, Subscriber<? super BiConsumer<ServerRequest, ServerResponse>> subscriber) {
+        filterConfiguration.getPost()
+                .stream()
+                .map(postFilter -> getPostFilter(codeRepositoryUrl, postFilter))
+                .forEach(subscriber::onNext);
+    }
+
+    private BiConsumer<ServerRequest, ServerResponse> getPostFilter(String codeServerURL, PostFilter postFilter) {
+        String filterURL = String.format("%s/%s-%s.jar", codeServerURL, postFilter.getName(), postFilter.getVersion());
+        if (!postFilterMap.containsKey(filterURL)) {
+            System.out.println("getPostFilter filterURL = " + filterURL);
+            try {
+                final URL url = URI.create(filterURL).toURL();
+                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
+                final Class<BiConsumer<ServerRequest, ServerResponse>> classToLoad = (Class<BiConsumer<ServerRequest, ServerResponse>>) Class.forName(postFilter.getName(), true, classLoader);
+                final BiConsumer<ServerRequest, ServerResponse> filter = classToLoad.getDeclaredConstructor().newInstance();
+                postFilterMap.put(filterURL, filter);
+            } catch (Exception e) {
+                throw new ResourceLoadException(e);
+            }
+        }
+        return postFilterMap.get(filterURL);
     }
 
     private Mono<ServerResponse> getErrorResponse(Throwable t, ServerRequest request) {
@@ -147,223 +329,5 @@ public class ArchuraPlatformApplication {
         bodyBuilder.header("X-A-Error-Message", errorMessage.toString());
     }
 
-    private Flux<Consumer<ServerRequest>> getGlobalPreFilters() {
-//        if (isNull(configuration.getGlobalConfiguration())) {
-//            String globalFilterURL = String.format("%s/global/filters.json", configRepositoryUrl);
-//            GlobalConfiguration globalConfiguration = getGlobalConfiguration(globalFilterURL);
-//            configuration.setGlobalConfiguration(globalConfiguration);
-//        }
-//        configuration.getGlobalConfiguration()
-//                .getPreFilters()
-//                .stream()
-//                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter))
-//                .collect(Collectors.toList());
-        final String globalFiltersUrl = String.format("%s/global/filters.json", configRepositoryUrl);
-        return Flux.from(subscriber ->
-                WebClient.create()
-                        .get()
-                        .uri(URI.create(globalFiltersUrl))
-                        .header(X_A_HEADER_KEY_PLATFORM_TOKEN, platformToken)
-                        .exchangeToMono(clientResponse -> clientResponse.bodyToMono(GlobalConfiguration.class))
-                        .subscribe(globalConfiguration -> globalConfiguration.getPreFilters()
-                                .stream()
-                                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter))
-                                .forEach(subscriber::onNext)));
-    }
-
-    private GlobalConfiguration getGlobalConfiguration(String globalFiltersUrl) {
-        return WebClient.create()
-                .get()
-                .uri(URI.create(globalFiltersUrl))
-                .header(X_A_HEADER_KEY_PLATFORM_TOKEN, platformToken)
-                .exchangeToMono(clientResponse -> clientResponse.bodyToMono(GlobalConfiguration.class))
-                .block();
-    }
-
-    private List<Consumer<ServerRequest>> getEnvironmentPreFilters(String environmentName) {
-        if (isNull(configuration.getEnvironmentConfiguration())) {
-            String environmentFiltersURL = String.format("%s/environments/%s/filters.json", configRepositoryUrl, environmentName);
-            EnvironmentConfiguration environmentConfiguration = getEnvironmentConfiguration(environmentFiltersURL);
-            configuration.setEnvironmentConfiguration(environmentConfiguration);
-        }
-        return configuration.getEnvironmentConfiguration()
-                .getPreFilters()
-                .stream()
-                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter))
-                .collect(Collectors.toList());
-    }
-
-    private EnvironmentConfiguration getEnvironmentConfiguration(String url) {
-        return WebClient.create()
-                .get()
-                .uri(URI.create(url))
-                .header(X_A_HEADER_KEY_PLATFORM_TOKEN, platformToken)
-                .exchangeToMono(clientResponse -> clientResponse.bodyToMono(EnvironmentConfiguration.class))
-                .block();
-    }
-
-    private List<Consumer<ServerRequest>> getTenantPreFilters(String environmentName, String tenantId) {
-        if (isNull(configuration.getTenantConfiguration())) {
-            String tenantFiltersURL = String.format("%s/environments/%s/tenants/%s/filters.json", configRepositoryUrl, environmentName, tenantId);
-            TenantConfiguration tenantConfiguration = getTenantConfiguration(tenantFiltersURL);
-            configuration.setTenantConfiguration(tenantConfiguration);
-        }
-        return configuration.getTenantConfiguration()
-                .getPreFilters()
-                .stream()
-                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter))
-                .collect(Collectors.toList());
-    }
-
-    private TenantConfiguration getTenantConfiguration(String url) {
-        return WebClient.create()
-                .get()
-                .uri(URI.create(url))
-                .header(X_A_HEADER_KEY_PLATFORM_TOKEN, platformToken)
-                .exchangeToMono(clientResponse -> clientResponse.bodyToMono(TenantConfiguration.class))
-                .block();
-    }
-
-    private Consumer<ServerRequest> getPreFilter(String codeServerURL, PreFilter preFilter) {
-        String filterURL = String.format("%s/%s-%s.jar", codeServerURL, preFilter.getName(), preFilter.getVersion());
-        if (!preFilterMap.containsKey(filterURL)) {
-            try {
-                final File file = new File(filterURL);
-                final URL url = file.toURI().toURL();
-                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
-                final String className = getMainClassName(classLoader);
-                final Class<Consumer<ServerRequest>> classToLoad = (Class<Consumer<ServerRequest>>) Class.forName(className, true, classLoader);
-                final Consumer<ServerRequest> filter = classToLoad.getDeclaredConstructor().newInstance();
-                preFilterMap.put(filterURL, filter);
-            } catch (Exception e) {
-                throw new ResourceLoadException(e);
-            }
-        }
-        return preFilterMap.get(filterURL);
-    }
-
-
-    private Map<String, HandlerFunction<ServerResponse>> getTenantFunctions(final ServerRequest serverRequest) {
-        if (isNull(configuration.getFunctionsConfiguration())) {
-            String environmentName = serverRequest.attribute("ENVIRONMENT").map(String::valueOf).orElse(DEFAULT_ENVIRONMENT);
-            String tenantId = serverRequest.attribute("TENANT_ID").map(String::valueOf).orElse(DEFAULT_TENANT_ID);
-            String tenantFunctionsURL = String.format("%s/environments/%s/tenants/%s/functions.json", configRepositoryUrl, environmentName, tenantId);
-            FunctionsConfiguration functionsConfiguration = getTenantFunctionsConfiguration(tenantFunctionsURL);
-            configuration.setFunctionsConfiguration(functionsConfiguration);
-        }
-        return configuration.getFunctionsConfiguration()
-                .getRouteFunctions()
-                .entrySet()
-                .stream()
-                .map(entry -> {
-                    final String routeId = entry.getKey();
-                    final Function function = entry.getValue();
-                    final HandlerFunction<ServerResponse> handlerFunction = getFunction(codeRepositoryUrl, function);
-                    return new AbstractMap.SimpleEntry<>(routeId, handlerFunction);
-                })
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-    }
-
-    private FunctionsConfiguration getTenantFunctionsConfiguration(String url) {
-        return WebClient.create()
-                .get()
-                .uri(URI.create(url))
-                .header(X_A_HEADER_KEY_PLATFORM_TOKEN, platformToken)
-                .exchangeToMono(clientResponse -> clientResponse.bodyToMono(FunctionsConfiguration.class))
-                .block();
-    }
-
-    private List<BiConsumer<ServerRequest, ServerResponse>> getTenantPostFilters(String environmentName, String tenantId) {
-        if (isNull(configuration.getTenantConfiguration())) {
-            String tenantFiltersURL = String.format("%s/environments/%s/tenants/%s/filters.json", configRepositoryUrl, environmentName, tenantId);
-            TenantConfiguration tenantConfiguration = getTenantConfiguration(tenantFiltersURL);
-            configuration.setTenantConfiguration(tenantConfiguration);
-        }
-        return configuration.getTenantConfiguration()
-                .getPostFilters()
-                .stream()
-                .map(postFilter -> getPostFilter(codeRepositoryUrl, postFilter))
-                .collect(Collectors.toList());
-    }
-
-    private BiConsumer<ServerRequest, ServerResponse> getPostFilter(String codeServerURL, PostFilter postFilter) {
-        String filterURL = String.format("%s/%s-%s.jar", codeServerURL, postFilter.getName(), postFilter.getVersion());
-        if (!postFilterMap.containsKey(filterURL)) {
-            try {
-                final File file = new File(filterURL);
-                final URL url = file.toURI().toURL();
-                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
-                final String className = getMainClassName(classLoader);
-                final Class<BiConsumer<ServerRequest, ServerResponse>> classToLoad = (Class<BiConsumer<ServerRequest, ServerResponse>>) Class.forName(className, true, classLoader);
-                final BiConsumer<ServerRequest, ServerResponse> filter = classToLoad.getDeclaredConstructor().newInstance();
-                postFilterMap.put(filterURL, filter);
-            } catch (Exception e) {
-                throw new ResourceLoadException(e);
-            }
-        }
-        return postFilterMap.get(filterURL);
-    }
-
-    private List<BiConsumer<ServerRequest, ServerResponse>> getEnvironmentPostFilters(String environmentName) {
-        if (isNull(configuration.getEnvironmentConfiguration())) {
-            String environmentFiltersURL = String.format("%s/environments/%s/filters.json", configRepositoryUrl, environmentName);
-            EnvironmentConfiguration environmentConfiguration = getEnvironmentConfiguration(environmentFiltersURL);
-            configuration.setEnvironmentConfiguration(environmentConfiguration);
-        }
-        return configuration.getEnvironmentConfiguration()
-                .getPostFilters()
-                .stream()
-                .map(postFilter -> getPostFilter(codeRepositoryUrl, postFilter))
-                .collect(Collectors.toList());
-    }
-
-    private List<BiConsumer<ServerRequest, ServerResponse>> getGlobalPostFilters() {
-        if (isNull(configuration.getGlobalConfiguration())) {
-            String globalFilterURL = String.format("%s/global/filters.json", configRepositoryUrl);
-            GlobalConfiguration globalConfiguration = getGlobalConfiguration(globalFilterURL);
-            configuration.setGlobalConfiguration(globalConfiguration);
-        }
-        return configuration.getGlobalConfiguration()
-                .getPostFilters()
-                .stream()
-                .map(postFilter -> getPostFilter(codeRepositoryUrl, postFilter))
-                .collect(Collectors.toList());
-    }
-
-    private HandlerFunction<ServerResponse> getFunction(String codeServerURL, Function function) {
-        String functionURL = String.format("%s/%s-%s.jar", codeServerURL, function.getName(), function.getVersion());
-        if (!functionMap.containsKey(functionURL)) {
-            try {
-                final File file = new File(functionURL);
-                final URL url = file.toURI().toURL();
-                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
-                final String className = getMainClassName(classLoader);
-                final Class<HandlerFunction<ServerResponse>> classToLoad = (Class<HandlerFunction<ServerResponse>>) Class.forName(className, true, classLoader);
-                final HandlerFunction<ServerResponse> handlerFunction = classToLoad.getDeclaredConstructor().newInstance();
-                functionMap.put(functionURL, handlerFunction);
-            } catch (Exception e) {
-                throw new ResourceLoadException(e);
-            }
-        }
-        return functionMap.get(functionURL);
-    }
-
-    private String getMainClassName(final URLClassLoader classLoader) throws IOException {
-        final URL resource = classLoader.findResource(MANIFEST_MF);
-        if (isNull(resource)) {
-            throw new MissingResourceException(String.format("Missing file: %s", MANIFEST_MF));
-        }
-        try (Scanner scanner = new Scanner(resource.openStream(), StandardCharsets.UTF_8.name())) {
-            String manifestContent = scanner.useDelimiter("\\A").next();
-            final String[] lines = manifestContent.split("\\n");
-            for (String line : lines) {
-                final String[] pair = line.split(":");
-                if (pair.length == 2 && MAIN_CLASS.equals(pair[0]) && pair[1] != null && !pair[1].trim().isEmpty()) {
-                    return pair[1].trim();
-                }
-            }
-        }
-        throw new MissingResourceException(String.format("Main class missing from manifest, '%s' entry missing in %s file.", MAIN_CLASS, MANIFEST_MF));
-    }
 
 }
