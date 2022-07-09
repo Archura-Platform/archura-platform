@@ -5,9 +5,9 @@ import lombok.Data;
 @Data
 public class Configuration {
 
-    private GlobalConfiguration globalConfiguration;
-    private EnvironmentConfiguration environmentConfiguration;
-    private TenantConfiguration tenantConfiguration;
+    private GlobalFiltersConfiguration globalFiltersConfiguration;
+    private EnvironmentFiltersConfiguration environmentFiltersConfiguration;
+    private TenantFiltersConfiguration tenantFiltersConfiguration;
     private FunctionsConfiguration functionsConfiguration;
 
 }
