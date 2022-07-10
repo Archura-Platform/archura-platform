@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Data;
 
 @Data
-public class PreFilter {
+public class FunctionConfiguration {
     private String name;
     private String version;
     private JsonNode config;

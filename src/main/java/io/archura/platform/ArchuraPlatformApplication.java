@@ -1,17 +1,15 @@
 package io.archura.platform;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.archura.platform.configuration.Configuration;
-import io.archura.platform.configuration.EnvironmentFiltersConfiguration;
-import io.archura.platform.configuration.Function;
-import io.archura.platform.configuration.FunctionsConfiguration;
-import io.archura.platform.configuration.GlobalFiltersConfiguration;
-import io.archura.platform.configuration.PostFilter;
-import io.archura.platform.configuration.PreFilter;
-import io.archura.platform.configuration.TenantFiltersConfiguration;
+import io.archura.platform.configuration.EnvironmentConfiguration;
+import io.archura.platform.configuration.FunctionConfiguration;
+import io.archura.platform.configuration.GlobalConfiguration;
+import io.archura.platform.configuration.PostFilterConfiguration;
+import io.archura.platform.configuration.PreFilterConfiguration;
+import io.archura.platform.configuration.TenantConfiguration;
 import io.archura.platform.exception.ConfigurationException;
-import io.archura.platform.exception.MissingResourceException;
 import io.archura.platform.exception.ResourceLoadException;
+import io.archura.platform.function.Configurable;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -24,8 +22,6 @@ import org.springframework.web.servlet.function.RouterFunctions;
 import org.springframework.web.servlet.function.ServerRequest;
 import org.springframework.web.servlet.function.ServerResponse;
 
-import java.io.File;
-import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
@@ -33,30 +29,28 @@ import java.net.URLClassLoader;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Scanner;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 import static java.util.Objects.isNull;
 
 @SpringBootApplication
 public class ArchuraPlatformApplication {
 
-    private static final String MAIN_CLASS = "Main-Class";
     private static final String DEFAULT_ENVIRONMENT = "default";
     private static final String DEFAULT_TENANT_ID = "default";
     private static final String CATCH_ALL_KEY = "*";
+
     private static final ExecutorService HTTP_CLIENT_EXECUTOR = Executors.newCachedThreadPool();
 
     @Value("${config.repository.url:http://config-service/}")
@@ -66,12 +60,13 @@ public class ArchuraPlatformApplication {
     private String codeRepositoryUrl;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final Configuration configuration = new Configuration();
 
-    private static final String MANIFEST_MF = "META-INF/MANIFEST.MF";
+    private final GlobalConfiguration globalConfiguration = new GlobalConfiguration();
+
     private final Map<String, HandlerFunction<ServerResponse>> functionMap = new ConcurrentHashMap<>();
 
     private final Map<String, Consumer<ServerRequest>> preFilterMap = new ConcurrentHashMap<>();
+
     private final Map<String, BiConsumer<ServerRequest, ServerResponse>> postFilterMap = new ConcurrentHashMap<>();
 
 
@@ -93,8 +88,12 @@ public class ArchuraPlatformApplication {
                         getTenantPreFilters(environmentName, tenantId).forEach(c -> c.accept(request));
 
                         final String routeId = request.attribute("ROUTE_ID").map(String::valueOf).orElse(CATCH_ALL_KEY);
-                        final ServerResponse response = getTenantFunctions(request)
-                                .getOrDefault(routeId, r -> ServerResponse.notFound().build())
+                        final ServerResponse response = getTenantFunctions(environmentName, tenantId, routeId)
+                                .orElse(r -> ServerResponse
+                                        .notFound()
+                                        .header(String.format("X-A-NotFound-%s-%s-%s", environmentName, tenantId, routeId))
+                                        .build()
+                                )
                                 .handle(request);
 
                         getTenantPostFilters(environmentName, tenantId).forEach(bc -> bc.accept(request, response));
@@ -109,159 +108,143 @@ public class ArchuraPlatformApplication {
     }
 
     private List<Consumer<ServerRequest>> getGlobalPreFilters() {
-        if (isNull(configuration.getGlobalFiltersConfiguration())) {
-            String globalFilterURL = String.format("%s/global/filters.json", configRepositoryUrl);
-            GlobalFiltersConfiguration globalFiltersConfiguration = getGlobalConfiguration(globalFilterURL);
-            configuration.setGlobalFiltersConfiguration(globalFiltersConfiguration);
+        if (globalConfiguration.getPre().isEmpty()) {
+            String globalConfigURL = String.format("%s/global/config.json", configRepositoryUrl);
+            GlobalConfiguration globalConfig = getGlobalConfiguration(globalConfigURL);
+            this.globalConfiguration.setPre(globalConfig.getPre());
+            this.globalConfiguration.setPost(globalConfig.getPost());
         }
-        return configuration.getGlobalFiltersConfiguration()
+        return globalConfiguration
                 .getPre()
                 .stream()
-                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter))
+                .map(preFilterConfig -> getPreFilter(codeRepositoryUrl, preFilterConfig))
                 .toList();
     }
 
-    private GlobalFiltersConfiguration getGlobalConfiguration(String url) {
-        return getConfiguration(url, GlobalFiltersConfiguration.class);
+    private GlobalConfiguration getGlobalConfiguration(String url) {
+        return getConfiguration(url, GlobalConfiguration.class);
     }
 
     private List<Consumer<ServerRequest>> getEnvironmentPreFilters(String environmentName) {
-        if (isNull(configuration.getEnvironmentFiltersConfiguration())) {
-            String environmentFiltersURL = String.format("%s/environments/%s/filters.json", configRepositoryUrl, environmentName);
-            EnvironmentFiltersConfiguration environmentFiltersConfiguration = getEnvironmentConfiguration(environmentFiltersURL);
-            configuration.setEnvironmentFiltersConfiguration(environmentFiltersConfiguration);
+        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        if (isNull(environmentConfiguration)) {
+            String environmentConfigURL = String.format("%s/environments/%s/config.json", configRepositoryUrl, environmentName);
+            EnvironmentConfiguration environmentConfig = getEnvironmentConfiguration(environmentConfigURL);
+            globalConfiguration.getEnvironments().put(environmentName, environmentConfig);
         }
-        return configuration.getEnvironmentFiltersConfiguration()
+        return globalConfiguration.getEnvironments().get(environmentName)
                 .getPre()
                 .stream()
                 .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter))
                 .toList();
     }
 
-    private EnvironmentFiltersConfiguration getEnvironmentConfiguration(String url) {
-        return getConfiguration(url, EnvironmentFiltersConfiguration.class);
+    private EnvironmentConfiguration getEnvironmentConfiguration(String url) {
+        return getConfiguration(url, EnvironmentConfiguration.class);
     }
 
     private List<Consumer<ServerRequest>> getTenantPreFilters(String environmentName, String tenantId) {
-        if (isNull(configuration.getTenantFiltersConfiguration())) {
-            String tenantFiltersURL = String.format("%s/environments/%s/tenants/%s/filters.json", configRepositoryUrl, environmentName, tenantId);
-            TenantFiltersConfiguration tenantFiltersConfiguration = getTenantConfiguration(tenantFiltersURL);
-            configuration.setTenantFiltersConfiguration(tenantFiltersConfiguration);
+        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        if (isNull(environmentConfiguration)) {
+            return Collections.emptyList();
         }
-        return configuration.getTenantFiltersConfiguration()
+        final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
+        if (isNull(tenantConfiguration)) {
+            String tenantConfigURL = String.format("%s/environments/%s/tenants/%s/config.json", configRepositoryUrl, environmentName, tenantId);
+            TenantConfiguration tenantConfig = getTenantConfiguration(tenantConfigURL);
+            environmentConfiguration.getTenants().put(tenantId, tenantConfig);
+        }
+        return environmentConfiguration.getTenants().get(tenantId)
                 .getPre()
                 .stream()
                 .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter))
                 .toList();
     }
 
-    private TenantFiltersConfiguration getTenantConfiguration(String url) {
-        return getConfiguration(url, TenantFiltersConfiguration.class);
+    private TenantConfiguration getTenantConfiguration(String url) {
+        return getConfiguration(url, TenantConfiguration.class);
     }
 
-    private Consumer<ServerRequest> getPreFilter(String codeServerURL, PreFilter preFilter) {
-        String filterURL = String.format("%s/%s-%s.jar", codeServerURL, preFilter.getName(), preFilter.getVersion());
-        if (!preFilterMap.containsKey(filterURL)) {
+    private Consumer<ServerRequest> getPreFilter(String codeServerURL, PreFilterConfiguration configuration) {
+        String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
+        if (!preFilterMap.containsKey(resourceUrl)) {
             try {
-                final File file = new File(filterURL);
-                final URL url = file.toURI().toURL();
+                final URL url = new URL(resourceUrl);
                 final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
-                final String className = getMainClassName(classLoader);
-                final Class<Consumer<ServerRequest>> classToLoad = (Class<Consumer<ServerRequest>>) Class.forName(className, true, classLoader);
-                final Consumer<ServerRequest> filter = classToLoad.getDeclaredConstructor().newInstance();
-                preFilterMap.put(filterURL, filter);
+                final String className = configuration.getName();
+                final Object object = Class.forName(className, true, classLoader).getDeclaredConstructor().newInstance();
+                if (Configurable.class.isAssignableFrom(object.getClass())) {
+                    final Configurable configurable = (Configurable) object;
+                    configurable.setConfiguration(configuration.getConfig());
+                }
+                @SuppressWarnings("unchecked") final Consumer<ServerRequest> filter = (Consumer<ServerRequest>) object;
+                preFilterMap.put(resourceUrl, filter);
             } catch (Exception e) {
                 throw new ResourceLoadException(e);
             }
         }
-        return preFilterMap.get(filterURL);
+        return preFilterMap.get(resourceUrl);
     }
 
 
-    private Map<String, HandlerFunction<ServerResponse>> getTenantFunctions(final ServerRequest serverRequest) {
-        if (isNull(configuration.getFunctionsConfiguration())) {
-            String environmentName = serverRequest.attribute("ENVIRONMENT").map(String::valueOf).orElse(DEFAULT_ENVIRONMENT);
-            String tenantId = serverRequest.attribute("TENANT_ID").map(String::valueOf).orElse(DEFAULT_TENANT_ID);
-            String tenantFunctionsURL = String.format("%s/environments/%s/tenants/%s/functions.json", configRepositoryUrl, environmentName, tenantId);
-            FunctionsConfiguration functionsConfiguration = getTenantFunctionsConfiguration(tenantFunctionsURL);
-            configuration.setFunctionsConfiguration(functionsConfiguration);
+    private Optional<HandlerFunction<ServerResponse>> getTenantFunctions(String environmentName, String tenantId, String routeId) {
+        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        if (isNull(environmentConfiguration)) {
+            return Optional.empty();
         }
-        return configuration.getFunctionsConfiguration()
-                .getRouteFunctions()
-                .entrySet()
-                .stream()
-                .map(entry -> {
-                    final String routeId = entry.getKey();
-                    final Function function = entry.getValue();
-                    final HandlerFunction<ServerResponse> handlerFunction = getFunction(codeRepositoryUrl, function);
-                    return new AbstractMap.SimpleEntry<>(routeId, handlerFunction);
-                })
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
+        if (isNull(tenantConfiguration)) {
+            return Optional.empty();
+        }
+        final Map<String, FunctionConfiguration> routeFunctions = tenantConfiguration.getRouteFunctions();
+        return Optional.ofNullable(routeFunctions.get(routeId))
+                .map(config -> getFunction(codeRepositoryUrl, config));
     }
 
-    private FunctionsConfiguration getTenantFunctionsConfiguration(String url) {
-        return getConfiguration(url, FunctionsConfiguration.class);
-    }
-
-    private HandlerFunction<ServerResponse> getFunction(String codeServerURL, Function function) {
-        String functionURL = String.format("%s/%s-%s.jar", codeServerURL, function.getName(), function.getVersion());
-        if (!functionMap.containsKey(functionURL)) {
+    private HandlerFunction<ServerResponse> getFunction(String codeServerURL, FunctionConfiguration configuration) {
+        String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
+        if (!functionMap.containsKey(resourceUrl)) {
             try {
-                final File file = new File(functionURL);
-                final URL url = file.toURI().toURL();
+                final URL url = new URL(resourceUrl);
                 final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
-                final String className = getMainClassName(classLoader);
-                @SuppressWarnings("unchecked") final Class<HandlerFunction<ServerResponse>> classToLoad =
-                        (Class<HandlerFunction<ServerResponse>>) Class.forName(className, true, classLoader);
-                final HandlerFunction<ServerResponse> handlerFunction = classToLoad.getDeclaredConstructor().newInstance();
-                functionMap.put(functionURL, handlerFunction);
+                final String className = configuration.getName();
+                final Object object = Class.forName(className, true, classLoader).getDeclaredConstructor().newInstance();
+                if (Configurable.class.isAssignableFrom(object.getClass())) {
+                    final Configurable configurable = (Configurable) object;
+                    configurable.setConfiguration(configuration.getConfig());
+                }
+                @SuppressWarnings("unchecked") final HandlerFunction<ServerResponse> handlerFunction = (HandlerFunction<ServerResponse>) object;
+                functionMap.put(resourceUrl, handlerFunction);
             } catch (Exception e) {
                 throw new ResourceLoadException(e);
             }
         }
-        return functionMap.get(functionURL);
+        return functionMap.get(resourceUrl);
     }
 
 
     private List<BiConsumer<ServerRequest, ServerResponse>> getTenantPostFilters(String environmentName, String tenantId) {
-        if (isNull(configuration.getTenantFiltersConfiguration())) {
-            String tenantFiltersURL = String.format("%s/environments/%s/tenants/%s/filters.json", configRepositoryUrl, environmentName, tenantId);
-            TenantFiltersConfiguration tenantFiltersConfiguration = getTenantConfiguration(tenantFiltersURL);
-            configuration.setTenantFiltersConfiguration(tenantFiltersConfiguration);
+        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        if (isNull(environmentConfiguration)) {
+            return Collections.emptyList();
         }
-        return configuration.getTenantFiltersConfiguration()
+        final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
+        if (isNull(tenantConfiguration)) {
+            return Collections.emptyList();
+        }
+        return tenantConfiguration
                 .getPost()
                 .stream()
-                .map(postFilter -> getPostFilter(codeRepositoryUrl, postFilter))
+                .map(preFilter -> getPostFilter(codeRepositoryUrl, preFilter))
                 .toList();
     }
 
-    private BiConsumer<ServerRequest, ServerResponse> getPostFilter(String codeServerURL, PostFilter postFilter) {
-        String filterURL = String.format("%s/%s-%s.jar", codeServerURL, postFilter.getName(), postFilter.getVersion());
-        if (!postFilterMap.containsKey(filterURL)) {
-            try {
-                final File file = new File(filterURL);
-                final URL url = file.toURI().toURL();
-                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
-                final String className = getMainClassName(classLoader);
-                @SuppressWarnings("unchecked") final Class<BiConsumer<ServerRequest, ServerResponse>> classToLoad =
-                        (Class<BiConsumer<ServerRequest, ServerResponse>>) Class.forName(className, true, classLoader);
-                final BiConsumer<ServerRequest, ServerResponse> filter = classToLoad.getDeclaredConstructor().newInstance();
-                postFilterMap.put(filterURL, filter);
-            } catch (Exception e) {
-                throw new ResourceLoadException(e);
-            }
-        }
-        return postFilterMap.get(filterURL);
-    }
-
     private List<BiConsumer<ServerRequest, ServerResponse>> getEnvironmentPostFilters(String environmentName) {
-        if (isNull(configuration.getEnvironmentFiltersConfiguration())) {
-            String environmentFiltersURL = String.format("%s/environments/%s/filters.json", configRepositoryUrl, environmentName);
-            EnvironmentFiltersConfiguration environmentFiltersConfiguration = getEnvironmentConfiguration(environmentFiltersURL);
-            configuration.setEnvironmentFiltersConfiguration(environmentFiltersConfiguration);
+        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        if (isNull(environmentConfiguration)) {
+            return Collections.emptyList();
         }
-        return configuration.getEnvironmentFiltersConfiguration()
+        return environmentConfiguration
                 .getPost()
                 .stream()
                 .map(postFilter -> getPostFilter(codeRepositoryUrl, postFilter))
@@ -269,18 +252,33 @@ public class ArchuraPlatformApplication {
     }
 
     private List<BiConsumer<ServerRequest, ServerResponse>> getGlobalPostFilters() {
-        if (isNull(configuration.getGlobalFiltersConfiguration())) {
-            String globalFilterURL = String.format("%s/global/filters.json", configRepositoryUrl);
-            GlobalFiltersConfiguration globalFiltersConfiguration = getGlobalConfiguration(globalFilterURL);
-            configuration.setGlobalFiltersConfiguration(globalFiltersConfiguration);
-        }
-        return configuration.getGlobalFiltersConfiguration()
+        return globalConfiguration
                 .getPost()
                 .stream()
-                .map(postFilter -> getPostFilter(codeRepositoryUrl, postFilter))
+                .map(postFilterConfig -> getPostFilter(codeRepositoryUrl, postFilterConfig))
                 .toList();
     }
 
+    private BiConsumer<ServerRequest, ServerResponse> getPostFilter(String codeServerURL, PostFilterConfiguration configuration) {
+        String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
+        if (!postFilterMap.containsKey(resourceUrl)) {
+            try {
+                final URL url = new URL(resourceUrl);
+                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
+                final String className = configuration.getName();
+                final Object object = Class.forName(className, true, classLoader).getDeclaredConstructor().newInstance();
+                if (Configurable.class.isAssignableFrom(object.getClass())) {
+                    final Configurable configurable = (Configurable) object;
+                    configurable.setConfiguration(configuration.getConfig());
+                }
+                @SuppressWarnings("unchecked") final BiConsumer<ServerRequest, ServerResponse> filter = (BiConsumer<ServerRequest, ServerResponse>) object;
+                postFilterMap.put(resourceUrl, filter);
+            } catch (Exception e) {
+                throw new ResourceLoadException(e);
+            }
+        }
+        return postFilterMap.get(resourceUrl);
+    }
 
     private <T> T getConfiguration(String url, Class<T> tClass) {
         HttpClient client = HttpClient.newBuilder()
@@ -311,8 +309,8 @@ public class ArchuraPlatformApplication {
     }
 
     private void addErrorHeaders(Throwable t, ServerResponse.BodyBuilder bodyBuilder) {
-        List<String> errorTypes = new ArrayList<>();
-        List<String> errorMessages = new ArrayList<>();
+        final List<String> errorTypes = new ArrayList<>();
+        final List<String> errorMessages = new ArrayList<>();
         errorTypes.add(t.getClass().getSimpleName());
         errorMessages.add(t.getMessage());
         Throwable cause = t.getCause();
@@ -321,25 +319,8 @@ public class ArchuraPlatformApplication {
             errorTypes.add(cause.getClass().getSimpleName());
             cause = cause.getCause();
         }
-        bodyBuilder.header("X-A-Error-Type", String.join(", ", errorTypes));
-        bodyBuilder.header("X-A-Error-Message", String.join(", ", errorMessages));
+        bodyBuilder.header("X-A-Error-Type", String.join(", ", String.join(",", errorTypes)));
+        bodyBuilder.header("X-A-Error-Message", String.join(", ", String.join(",", errorMessages)));
     }
 
-    private String getMainClassName(final URLClassLoader classLoader) throws IOException {
-        final URL resource = classLoader.findResource(MANIFEST_MF);
-        if (isNull(resource)) {
-            throw new MissingResourceException(String.format("Missing file: %s", MANIFEST_MF));
-        }
-        try (Scanner scanner = new Scanner(resource.openStream(), StandardCharsets.UTF_8.name())) {
-            String manifestContent = scanner.useDelimiter("\\A").next();
-            final String[] lines = manifestContent.split("\\n");
-            for (String line : lines) {
-                final String[] pair = line.split(":");
-                if (pair.length == 2 && MAIN_CLASS.equals(pair[0]) && pair[1] != null && !pair[1].trim().isEmpty()) {
-                    return pair[1].trim();
-                }
-            }
-        }
-        throw new MissingResourceException(String.format("Main class missing from manifest, '%s' entry missing in %s file.", MAIN_CLASS, MANIFEST_MF));
-    }
 }
