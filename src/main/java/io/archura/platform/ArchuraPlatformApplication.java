@@ -48,6 +48,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static java.util.Objects.isNull;
+import static java.util.Objects.nonNull;
 
 @SpringBootApplication
 public class ArchuraPlatformApplication {
@@ -199,9 +200,17 @@ public class ArchuraPlatformApplication {
         if (isNull(tenantConfiguration)) {
             return Optional.empty();
         }
+        final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
         final Map<String, FunctionConfiguration> routeFunctions = tenantConfiguration.getRouteFunctions();
-        return Optional.ofNullable(routeFunctions.get(routeId))
-                .map(config -> getFunction(codeRepositoryUrl, config, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
+        final FunctionConfiguration routeFunctionConfig = routeFunctions.get(routeId);
+        if (nonNull(routeFunctionConfig)) {
+            return Optional.of(getFunction(codeRepositoryUrl, routeFunctionConfig, query));
+        }
+        final FunctionConfiguration catchAllRouteFunctionConfig = routeFunctions.get(CATCH_ALL_KEY);
+        if (nonNull(catchAllRouteFunctionConfig)) {
+            return Optional.of(getFunction(codeRepositoryUrl, catchAllRouteFunctionConfig, query));
+        }
+        return Optional.empty();
     }
 
     private HandlerFunction<ServerResponse> getFunction(String codeServerURL, FunctionConfiguration configuration, String query) {
