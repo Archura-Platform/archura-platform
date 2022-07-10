@@ -181,7 +181,7 @@ public class ArchuraPlatformApplication {
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         if (!preFilterMap.containsKey(resourceKey)) {
             try {
-                final Object object = createObject(resourceUrl, configuration.getName(), configuration.getConfig());
+                final Object object = createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
                 @SuppressWarnings("unchecked") final Consumer<ServerRequest> filter = (Consumer<ServerRequest>) object;
                 preFilterMap.put(resourceKey, filter);
             } catch (Exception e) {
@@ -218,7 +218,7 @@ public class ArchuraPlatformApplication {
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         if (!functionMap.containsKey(resourceKey)) {
             try {
-                final Object object = createObject(resourceUrl, configuration.getName(), configuration.getConfig());
+                final Object object = createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
                 @SuppressWarnings("unchecked") final HandlerFunction<ServerResponse> handlerFunction = (HandlerFunction<ServerResponse>) object;
                 functionMap.put(resourceKey, handlerFunction);
             } catch (Exception e) {
@@ -228,10 +228,10 @@ public class ArchuraPlatformApplication {
         return functionMap.get(resourceKey);
     }
 
-    private Object createObject(String resourceUrl, String className, JsonNode jsonNode)
+    private Object createObject(String resourceUrl, String resourceKey, String className, JsonNode jsonNode)
             throws IOException, ReflectiveOperationException {
         if (isNull(remoteClassMap.get(resourceUrl))) {
-            final URL url = new URL(resourceUrl);
+            final URL url = new URL(resourceKey);
             final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
             final Class<?> remoteClass = Class.forName(className, true, classLoader);
             remoteClassMap.put(resourceUrl, remoteClass);
@@ -287,7 +287,7 @@ public class ArchuraPlatformApplication {
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         if (!postFilterMap.containsKey(resourceKey)) {
             try {
-                final Object object = createObject(resourceUrl, configuration.getName(), configuration.getConfig());
+                final Object object = createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
                 @SuppressWarnings("unchecked") final BiConsumer<ServerRequest, ServerResponse> filter = (BiConsumer<ServerRequest, ServerResponse>) object;
                 postFilterMap.put(resourceKey, filter);
             } catch (Exception e) {
