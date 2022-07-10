@@ -1,7 +1,7 @@
 package io.archura.platform.function;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import java.util.Map;
 
 public interface Configurable {
-    void setConfiguration(JsonNode configuration);
+    void setConfiguration(Map<String, Object> configuration);
 }

@@ -1,5 +1,7 @@
 package io.archura.platform;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.archura.platform.configuration.EnvironmentConfiguration;
 import io.archura.platform.configuration.FunctionConfiguration;
@@ -14,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.redis.core.HashOperations;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.servlet.function.HandlerFunction;
 import org.springframework.web.servlet.function.RequestPredicates;
@@ -22,6 +25,7 @@ import org.springframework.web.servlet.function.RouterFunctions;
 import org.springframework.web.servlet.function.ServerRequest;
 import org.springframework.web.servlet.function.ServerResponse;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
@@ -32,6 +36,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -68,6 +73,8 @@ public class ArchuraPlatformApplication {
     private final Map<String, Consumer<ServerRequest>> preFilterMap = new ConcurrentHashMap<>();
 
     private final Map<String, BiConsumer<ServerRequest, ServerResponse>> postFilterMap = new ConcurrentHashMap<>();
+    private final Map<String, Class<?>> remoteClassMap = new HashMap<>();
+    private Map<String, TenantCache> tenantCacheMap = new HashMap<>();
 
 
     public static void main(String[] args) {
@@ -75,7 +82,7 @@ public class ArchuraPlatformApplication {
     }
 
     @Bean
-    public RouterFunction<ServerResponse> routes() {
+    public RouterFunction<ServerResponse> routes(HashOperations<String, String, Map<String, Object>> hashOperations) {
         return RouterFunctions.route()
                 .route(RequestPredicates.all(), request -> {
                     try {
@@ -88,6 +95,9 @@ public class ArchuraPlatformApplication {
                         getTenantPreFilters(environmentName, tenantId).forEach(c -> c.accept(request));
 
                         final String routeId = request.attribute("ROUTE_ID").map(String::valueOf).orElse(CATCH_ALL_KEY);
+                        final String tenantCacheKey = String.format("%s|%s", environmentName, tenantId);
+                        final TenantCache tenantCache = tenantCacheMap.getOrDefault(tenantCacheKey, new TenantCache(tenantCacheKey, hashOperations));
+                        request.attributes().put(Cache.class.getSimpleName(), tenantCache);
                         final ServerResponse response = getTenantFunctions(environmentName, tenantId, routeId)
                                 .orElse(r -> ServerResponse
                                         .notFound()
@@ -117,7 +127,7 @@ public class ArchuraPlatformApplication {
         return globalConfiguration
                 .getPre()
                 .stream()
-                .map(preFilterConfig -> getPreFilter(codeRepositoryUrl, preFilterConfig))
+                .map(preFilterConfig -> getPreFilter(codeRepositoryUrl, preFilterConfig, "global"))
                 .toList();
     }
 
@@ -135,7 +145,7 @@ public class ArchuraPlatformApplication {
         return globalConfiguration.getEnvironments().get(environmentName)
                 .getPre()
                 .stream()
-                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter))
+                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter, String.format("environmentName=%s", environmentName)))
                 .toList();
     }
 
@@ -157,7 +167,7 @@ public class ArchuraPlatformApplication {
         return environmentConfiguration.getTenants().get(tenantId)
                 .getPre()
                 .stream()
-                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter))
+                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
                 .toList();
     }
 
@@ -165,27 +175,20 @@ public class ArchuraPlatformApplication {
         return getConfiguration(url, TenantConfiguration.class);
     }
 
-    private Consumer<ServerRequest> getPreFilter(String codeServerURL, PreFilterConfiguration configuration) {
-        String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
-        if (!preFilterMap.containsKey(resourceUrl)) {
+    private Consumer<ServerRequest> getPreFilter(String codeServerURL, PreFilterConfiguration configuration, String query) {
+        final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
+        final String resourceKey = String.format("%s?%s", resourceUrl, query);
+        if (!preFilterMap.containsKey(resourceKey)) {
             try {
-                final URL url = new URL(resourceUrl);
-                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
-                final String className = configuration.getName();
-                final Object object = Class.forName(className, true, classLoader).getDeclaredConstructor().newInstance();
-                if (Configurable.class.isAssignableFrom(object.getClass())) {
-                    final Configurable configurable = (Configurable) object;
-                    configurable.setConfiguration(configuration.getConfig());
-                }
+                final Object object = createObject(resourceUrl, configuration.getName(), configuration.getConfig());
                 @SuppressWarnings("unchecked") final Consumer<ServerRequest> filter = (Consumer<ServerRequest>) object;
-                preFilterMap.put(resourceUrl, filter);
+                preFilterMap.put(resourceKey, filter);
             } catch (Exception e) {
                 throw new ResourceLoadException(e);
             }
         }
-        return preFilterMap.get(resourceUrl);
+        return preFilterMap.get(resourceKey);
     }
-
 
     private Optional<HandlerFunction<ServerResponse>> getTenantFunctions(String environmentName, String tenantId, String routeId) {
         final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
@@ -198,30 +201,41 @@ public class ArchuraPlatformApplication {
         }
         final Map<String, FunctionConfiguration> routeFunctions = tenantConfiguration.getRouteFunctions();
         return Optional.ofNullable(routeFunctions.get(routeId))
-                .map(config -> getFunction(codeRepositoryUrl, config));
+                .map(config -> getFunction(codeRepositoryUrl, config, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
     }
 
-    private HandlerFunction<ServerResponse> getFunction(String codeServerURL, FunctionConfiguration configuration) {
-        String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
-        if (!functionMap.containsKey(resourceUrl)) {
+    private HandlerFunction<ServerResponse> getFunction(String codeServerURL, FunctionConfiguration configuration, String query) {
+        final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
+        final String resourceKey = String.format("%s?%s", resourceUrl, query);
+        if (!functionMap.containsKey(resourceKey)) {
             try {
-                final URL url = new URL(resourceUrl);
-                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
-                final String className = configuration.getName();
-                final Object object = Class.forName(className, true, classLoader).getDeclaredConstructor().newInstance();
-                if (Configurable.class.isAssignableFrom(object.getClass())) {
-                    final Configurable configurable = (Configurable) object;
-                    configurable.setConfiguration(configuration.getConfig());
-                }
+                final Object object = createObject(resourceUrl, configuration.getName(), configuration.getConfig());
                 @SuppressWarnings("unchecked") final HandlerFunction<ServerResponse> handlerFunction = (HandlerFunction<ServerResponse>) object;
-                functionMap.put(resourceUrl, handlerFunction);
+                functionMap.put(resourceKey, handlerFunction);
             } catch (Exception e) {
                 throw new ResourceLoadException(e);
             }
         }
-        return functionMap.get(resourceUrl);
+        return functionMap.get(resourceKey);
     }
 
+    private Object createObject(String resourceUrl, String className, JsonNode jsonNode)
+            throws IOException, ReflectiveOperationException {
+        if (isNull(remoteClassMap.get(resourceUrl))) {
+            final URL url = new URL(resourceUrl);
+            final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
+            final Class<?> remoteClass = Class.forName(className, true, classLoader);
+            remoteClassMap.put(resourceUrl, remoteClass);
+        }
+        final Object object = remoteClassMap.get(resourceUrl).getDeclaredConstructor().newInstance();
+        if (Configurable.class.isAssignableFrom(object.getClass())) {
+            final Configurable configurable = (Configurable) object;
+            final Map<String, Object> config = objectMapper.convertValue(jsonNode, new TypeReference<>() {
+            });
+            configurable.setConfiguration(Collections.unmodifiableMap(config));
+        }
+        return object;
+    }
 
     private List<BiConsumer<ServerRequest, ServerResponse>> getTenantPostFilters(String environmentName, String tenantId) {
         final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
@@ -235,7 +249,7 @@ public class ArchuraPlatformApplication {
         return tenantConfiguration
                 .getPost()
                 .stream()
-                .map(preFilter -> getPostFilter(codeRepositoryUrl, preFilter))
+                .map(preFilter -> getPostFilter(codeRepositoryUrl, preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
                 .toList();
     }
 
@@ -247,7 +261,7 @@ public class ArchuraPlatformApplication {
         return environmentConfiguration
                 .getPost()
                 .stream()
-                .map(postFilter -> getPostFilter(codeRepositoryUrl, postFilter))
+                .map(postFilter -> getPostFilter(codeRepositoryUrl, postFilter, String.format("environmentName=%s", environmentName)))
                 .toList();
     }
 
@@ -255,29 +269,23 @@ public class ArchuraPlatformApplication {
         return globalConfiguration
                 .getPost()
                 .stream()
-                .map(postFilterConfig -> getPostFilter(codeRepositoryUrl, postFilterConfig))
+                .map(postFilterConfig -> getPostFilter(codeRepositoryUrl, postFilterConfig, "global"))
                 .toList();
     }
 
-    private BiConsumer<ServerRequest, ServerResponse> getPostFilter(String codeServerURL, PostFilterConfiguration configuration) {
+    private BiConsumer<ServerRequest, ServerResponse> getPostFilter(String codeServerURL, PostFilterConfiguration configuration, String query) {
         String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
-        if (!postFilterMap.containsKey(resourceUrl)) {
+        final String resourceKey = String.format("%s?%s", resourceUrl, query);
+        if (!postFilterMap.containsKey(resourceKey)) {
             try {
-                final URL url = new URL(resourceUrl);
-                final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
-                final String className = configuration.getName();
-                final Object object = Class.forName(className, true, classLoader).getDeclaredConstructor().newInstance();
-                if (Configurable.class.isAssignableFrom(object.getClass())) {
-                    final Configurable configurable = (Configurable) object;
-                    configurable.setConfiguration(configuration.getConfig());
-                }
+                final Object object = createObject(resourceUrl, configuration.getName(), configuration.getConfig());
                 @SuppressWarnings("unchecked") final BiConsumer<ServerRequest, ServerResponse> filter = (BiConsumer<ServerRequest, ServerResponse>) object;
-                postFilterMap.put(resourceUrl, filter);
+                postFilterMap.put(resourceKey, filter);
             } catch (Exception e) {
                 throw new ResourceLoadException(e);
             }
         }
-        return postFilterMap.get(resourceUrl);
+        return postFilterMap.get(resourceKey);
     }
 
     private <T> T getConfiguration(String url, Class<T> tClass) {
