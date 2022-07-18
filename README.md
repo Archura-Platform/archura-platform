@@ -4,5 +4,5 @@ Archura Platform.
 Add the following VM parameter to enable sandboxing.
 
 ```
---add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED
+--enable-preview --add-exports java.base/jdk.internal.reflect=ALL-UNNAMED
 ```
