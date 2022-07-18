@@ -44,6 +44,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -77,13 +78,21 @@ public class ArchuraPlatformApplication {
     private final Map<String, Class<?>> remoteClassMap = new HashMap<>();
     private Map<String, TenantCache> tenantCacheMap = new HashMap<>();
 
+    private final Map<String, HttpClient> httpClientMap = new HashMap<>();
 
     public static void main(String[] args) {
         SpringApplication.run(ArchuraPlatformApplication.class, args);
     }
 
     @Bean
-    public RouterFunction<ServerResponse> routes(HashOperations<String, String, Map<String, Object>> hashOperations) {
+    public ThreadFactory threadFactory() {
+        return Thread.ofVirtual().name("VIRTUAL-FACTORY").factory();
+    }
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(
+            HashOperations<String, String, Map<String, Object>> hashOperations,
+            ThreadFactory threadFactory) {
         return RouterFunctions.route()
                 .route(RequestPredicates.all(), request -> {
                     try {
@@ -97,8 +106,12 @@ public class ArchuraPlatformApplication {
 
                         final String routeId = request.attribute("ROUTE_ID").map(String::valueOf).orElse(CATCH_ALL_KEY);
                         final String tenantCacheKey = String.format("%s|%s", environmentName, tenantId);
+
                         final TenantCache tenantCache = tenantCacheMap.getOrDefault(tenantCacheKey, new TenantCache(tenantCacheKey, hashOperations));
+                        final HttpClient httpClient = httpClientMap.computeIfAbsent(tenantCacheKey, tck -> buildHttpClient(threadFactory));
+
                         request.attributes().put(Cache.class.getSimpleName(), tenantCache);
+                        request.attributes().put(HttpClient.class.getSimpleName(), httpClient);
                         final ServerResponse response = getTenantFunctions(environmentName, tenantId, routeId)
                                 .orElse(r -> ServerResponse
                                         .notFound()
@@ -189,6 +202,14 @@ public class ArchuraPlatformApplication {
             }
         }
         return preFilterMap.get(resourceKey);
+    }
+
+    private HttpClient buildHttpClient(final ThreadFactory threadFactory) {
+        return HttpClient
+                .newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .executor(Executors.newThreadPerTaskExecutor(threadFactory))
+                .build();
     }
 
     private Optional<HandlerFunction<ServerResponse>> getTenantFunctions(String environmentName, String tenantId, String routeId) {
