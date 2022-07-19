@@ -1,4 +1,4 @@
-package io.archura.platform;
+package io.archura.platform.cache;
 
 import com.fasterxml.jackson.databind.type.MapType;
 import com.fasterxml.jackson.databind.type.TypeFactory;

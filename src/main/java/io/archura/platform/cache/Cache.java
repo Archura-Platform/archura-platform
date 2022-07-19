@@ -1,4 +1,4 @@
-package io.archura.platform;
+package io.archura.platform.cache;
 
 import java.util.Collection;
 import java.util.List;
