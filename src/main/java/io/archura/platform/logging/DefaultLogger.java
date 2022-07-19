@@ -33,7 +33,7 @@ public class DefaultLogger implements Logger {
     private static final String DATETIME_PATTERN = "yyyy-MM-dd HH:mm:ss.SSS";
     private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern(DATETIME_PATTERN);
     private static final LogWriter logWriter = LogWriter.create();
-    private static final String DEFAULT_LOG_TEMPLATE = "%s _GREEN_%5s_RESET_ [_BLUE_%s_RESET_][_PURPLE_%s_RESET_][%18s] _CYAN_%20s.%-30s_RESET_ - %s";
+    private static final String DEFAULT_LOG_TEMPLATE = "%s _GREEN_%5s_RESET_ [_BLUE_%s_RESET_][_PURPLE_%s_RESET_][%18s]_CYAN_[%50s]_RESET_ - %s";
 
     private final System.Logger.Level currentLogLevel;
     private final String environment;
@@ -97,13 +97,14 @@ public class DefaultLogger implements Logger {
 
     private void log(String logLevel, String message, Object[] arguments) {
         final StackTraceElement element = Thread.currentThread().getStackTrace()[3];
-        final String className = element.getClassName();
-        final String methodName = element.getMethodName();
+        final String classMethodLine = element.getClassName() + "." + element.getMethodName() + "():" + element.getLineNumber();
+        final String classMethodLineSub = classMethodLine.length() > 50 ? classMethodLine.substring(classMethodLine.length() - 50) : classMethodLine;
+
         final String thread = String.format("%s-%s", Thread.currentThread().threadId(), Thread.currentThread().getName());
         final String logMessage = String.format(message, arguments);
         final String date = DATETIME_FORMATTER.format(LocalDateTime.now());
         logWriter.log(logLevel, String.format(logTemplate,
-                date, logLevel, environment, tenantId, thread, className, methodName, logMessage));
+                date, logLevel, environment, tenantId, thread, classMethodLineSub, logMessage));
     }
 
 }

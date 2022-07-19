@@ -2,7 +2,7 @@ package io.archura.platform.attribute;
 
 public enum EnvironmentKeys {
 
-    TENANT_NOT_SET("NO_TENANT"),
+    TENANT_NOT_SET("NO_TENT"),
     DEFAULT_TENANT_ID("DEFAULT"),
     REQUEST_TENANT_ID("ARCHURA_REQUEST_TENANT_ID");
 

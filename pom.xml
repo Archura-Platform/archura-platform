@@ -58,6 +58,8 @@
                         <arg>--add-exports</arg>
                         <arg>java.base/jdk.internal.reflect=ALL-UNNAMED</arg>
                     </compilerArgs>
+                    <source>19</source>
+                    <target>19</target>
                 </configuration>
             </plugin>
         </plugins>

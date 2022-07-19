@@ -80,8 +80,8 @@ public class ArchuraPlatformApplication {
     private final Map<String, TenantCache> tenantCacheMap = new HashMap<>();
     private final Map<String, Logger> tenantLoggerMap = new HashMap<>();
     private final Map<String, Class<?>> remoteClassMap = new HashMap<>();
-
     private final Map<String, HttpClient> tenantHttpClientMap = new HashMap<>();
+
     private final HttpClient configurationHttpClient = buildDefaultHttpClient();
 
     public static void main(String[] args) {
