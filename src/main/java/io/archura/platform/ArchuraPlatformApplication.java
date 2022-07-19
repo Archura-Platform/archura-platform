@@ -15,6 +15,8 @@ import io.archura.platform.function.Configurable;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.web.embedded.tomcat.TomcatProtocolHandlerCustomizer;
+import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.http.HttpStatus;
@@ -58,8 +60,6 @@ public class ArchuraPlatformApplication {
     private static final String DEFAULT_TENANT_ID = "default";
     private static final String CATCH_ALL_KEY = "*";
 
-    private static final ExecutorService HTTP_CLIENT_EXECUTOR = Executors.newCachedThreadPool();
-
     @Value("${config.repository.url:http://config-service/}")
     private String configRepositoryUrl;
 
@@ -79,20 +79,30 @@ public class ArchuraPlatformApplication {
     private Map<String, TenantCache> tenantCacheMap = new HashMap<>();
 
     private final Map<String, HttpClient> httpClientMap = new HashMap<>();
+    private final HttpClient configurationHttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(1)).build();
 
     public static void main(String[] args) {
         SpringApplication.run(ArchuraPlatformApplication.class, args);
     }
 
     @Bean
-    public ThreadFactory threadFactory() {
-        return Thread.ofVirtual().name("VIRTUAL-FACTORY").factory();
+    public TomcatServletWebServerFactory tomcatContainerFactory() {
+        TomcatServletWebServerFactory factory = new TomcatServletWebServerFactory();
+        factory.setTomcatProtocolHandlerCustomizers(
+                Collections.singletonList(tomcatProtocolHandlerCustomizer())
+        );
+        return factory;
     }
 
     @Bean
-    public RouterFunction<ServerResponse> routes(
-            HashOperations<String, String, Map<String, Object>> hashOperations,
-            ThreadFactory threadFactory) {
+    public TomcatProtocolHandlerCustomizer<?> tomcatProtocolHandlerCustomizer() {
+        final ThreadFactory factory = Thread.ofVirtual().name("VIRTUAL-THREAD").factory();
+        final ExecutorService executorService = Executors.newCachedThreadPool(factory);
+        return protocolHandler -> protocolHandler.setExecutor(executorService);
+    }
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(HashOperations<String, String, Map<String, Object>> hashOperations) {
         return RouterFunctions.route()
                 .route(RequestPredicates.all(), request -> {
                     try {
@@ -108,10 +118,8 @@ public class ArchuraPlatformApplication {
                         final String tenantCacheKey = String.format("%s|%s", environmentName, tenantId);
 
                         final TenantCache tenantCache = tenantCacheMap.getOrDefault(tenantCacheKey, new TenantCache(tenantCacheKey, hashOperations));
-                        final HttpClient httpClient = httpClientMap.computeIfAbsent(tenantCacheKey, tck -> buildHttpClient(threadFactory));
 
                         request.attributes().put(Cache.class.getSimpleName(), tenantCache);
-                        request.attributes().put(HttpClient.class.getSimpleName(), httpClient);
                         final ServerResponse response = getTenantFunctions(environmentName, tenantId, routeId)
                                 .orElse(r -> ServerResponse
                                         .notFound()
@@ -202,14 +210,6 @@ public class ArchuraPlatformApplication {
             }
         }
         return preFilterMap.get(resourceKey);
-    }
-
-    private HttpClient buildHttpClient(final ThreadFactory threadFactory) {
-        return HttpClient
-                .newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .executor(Executors.newThreadPerTaskExecutor(threadFactory))
-                .build();
     }
 
     private Optional<HandlerFunction<ServerResponse>> getTenantFunctions(String environmentName, String tenantId, String routeId) {
@@ -319,16 +319,12 @@ public class ArchuraPlatformApplication {
     }
 
     private <T> T getConfiguration(String url, Class<T> tClass) {
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(1))
-                .executor(HTTP_CLIENT_EXECUTOR)
-                .build();
         HttpRequest request = HttpRequest.newBuilder()
                 .GET()
                 .uri(URI.create(url))
                 .build();
         try {
-            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            HttpResponse<InputStream> response = configurationHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             return objectMapper.readValue(response.body(), tClass);
         } catch (Exception e) {
             throw new ConfigurationException(e);
