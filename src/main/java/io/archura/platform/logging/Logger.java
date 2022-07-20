@@ -1,7 +1,5 @@
 package io.archura.platform.logging;
 
-import java.io.PrintStream;
-
 public interface Logger {
 
     /**
@@ -27,31 +25,5 @@ public interface Logger {
      * @param arguments log arguments.
      */
     void error(String message, Object... arguments);
-
-    static Logger consoleLogger() {
-        return new Logger() {
-
-            private PrintStream out = System.out;
-
-            @Override
-            public void info(String message, Object... arguments) {
-                log(message, arguments);
-            }
-
-            @Override
-            public void debug(String message, Object... arguments) {
-                log(message, arguments);
-            }
-
-            @Override
-            public void error(String message, Object... arguments) {
-                log(message, arguments);
-            }
-
-            private void log(String message, Object... arguments) {
-                out.printf(String.format(message, arguments));
-            }
-        };
-    }
 
 }

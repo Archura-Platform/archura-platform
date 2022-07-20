@@ -1,5 +1,6 @@
 package io.archura.platform.context;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.archura.platform.cache.Cache;
 import io.archura.platform.logging.Logger;
 
@@ -13,5 +14,7 @@ public interface Context {
     Logger getLogger();
 
     HttpClient getHttpClient();
+
+    ObjectMapper getObjectMapper();
 
 }

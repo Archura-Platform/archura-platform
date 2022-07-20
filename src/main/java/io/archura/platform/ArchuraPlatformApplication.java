@@ -104,16 +104,25 @@ public class ArchuraPlatformApplication {
         return protocolHandler -> protocolHandler.setExecutor(executorService);
     }
 
+    private void loadGlobalConfiguration() {
+        final String globalConfigURL = String.format("%s/global/config.json", configRepositoryUrl);
+        final GlobalConfiguration globalConfig = getGlobalConfiguration(globalConfigURL);
+        this.globalConfiguration.setPre(globalConfig.getPre());
+        this.globalConfiguration.setPost(globalConfig.getPost());
+        this.globalConfiguration.setLogLevel(globalConfig.getLogLevel());
+    }
+
     @Bean
     public RouterFunction<ServerResponse> routes(HashOperations<String, String, Map<String, Object>> hashOperations) {
+        loadGlobalConfiguration();
         return RouterFunctions.route()
                 .route(RequestPredicates.all(), request -> {
                     try {
                         final Map<String, Object> attributes = request.attributes();
+                        attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), this.globalConfiguration.getLogLevel());
                         rebuildContext(attributes, hashOperations);
 
                         getGlobalPreFilters().forEach(c -> c.accept(request));
-                        attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), GlobalKeys.DEFAULT_ENVIRONMENT.getKey());
                         rebuildContext(attributes, hashOperations);
 
                         String environmentName = String.valueOf(attributes.get(GlobalKeys.REQUEST_ENVIRONMENT.getKey()));
@@ -156,8 +165,13 @@ public class ArchuraPlatformApplication {
                 .cache(getTenantCache(attributes, hashOperations))
                 .logger(getLogger(attributes))
                 .httpClient(getHttpClient(attributes))
+                .objectMapper(getObjectMapper(attributes))
                 .build();
         attributes.put(Context.class.getSimpleName(), initialContext);
+    }
+
+    private ObjectMapper getObjectMapper(Map<String, Object> attributes) {
+        return objectMapper;
     }
 
     private Optional<Cache> getTenantCache(final Map<String, Object> attributes, final HashOperations<String, String, Map<String, Object>> hashOperations) {
@@ -201,12 +215,6 @@ public class ArchuraPlatformApplication {
     }
 
     private List<Consumer<ServerRequest>> getGlobalPreFilters() {
-        if (globalConfiguration.getPre().isEmpty()) {
-            String globalConfigURL = String.format("%s/global/config.json", configRepositoryUrl);
-            GlobalConfiguration globalConfig = getGlobalConfiguration(globalConfigURL);
-            this.globalConfiguration.setPre(globalConfig.getPre());
-            this.globalConfiguration.setPost(globalConfig.getPost());
-        }
         return globalConfiguration
                 .getPre()
                 .stream()
@@ -389,8 +397,13 @@ public class ArchuraPlatformApplication {
                 .build();
         try {
             HttpResponse<InputStream> response = configurationHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-            return objectMapper.readValue(response.body(), tClass);
-        } catch (Exception e) {
+            if (response.statusCode() >= 200 && response.statusCode() <= 299) {
+                return objectMapper.readValue(response.body(), tClass);
+            } else {
+                final String errorMessage = String.format("Configuration file could not be found, url: %s", url);
+                throw new ConfigurationException(errorMessage);
+            }
+        } catch (IOException | InterruptedException e) {
             throw new ConfigurationException(e);
         }
     }
