@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.type.TypeFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.data.redis.connection.RedisConfiguration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.HashOperations;
@@ -16,15 +16,36 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.util.Map;
 
+import static java.util.Objects.nonNull;
+
 @Configuration
 public class CacheConfiguration {
 
     @Value("${redis.host:localhost}")
     private String redisHost;
 
+    @Value("${redis.port:6379}")
+    private int redisPort;
+
+    @Value("${redis.database:0}")
+    private int redisDatabase;
+
+    @Value("${redis.user:#{null}}")
+    private String redisUser;
+
+    @Value("${redis.password:#{null}}")
+    private String redisPassword;
+
     @Bean
     public RedisConnectionFactory redisConnectionFactory() {
-        final RedisConfiguration redisConfiguration = new RedisStandaloneConfiguration(redisHost);
+        final RedisStandaloneConfiguration redisConfiguration = new RedisStandaloneConfiguration(redisHost, redisPort);
+        redisConfiguration.setDatabase(redisDatabase);
+        if (nonNull(redisUser)) {
+            redisConfiguration.setUsername(redisUser);
+        }
+        if (nonNull(redisPassword)) {
+            redisConfiguration.setPassword(RedisPassword.of(redisPassword));
+        }
         return new LettuceConnectionFactory(redisConfiguration);
     }
 
