@@ -19,8 +19,8 @@ import io.archura.platform.context.RequestContext;
 import io.archura.platform.exception.ConfigurationException;
 import io.archura.platform.exception.ErrorDetail;
 import io.archura.platform.exception.FunctionIsNotAHandlerFunctionException;
-import io.archura.platform.exception.PostFilterIsNotABiConsumerException;
-import io.archura.platform.exception.PreFilterIsNotAConsumerException;
+import io.archura.platform.exception.PostFilterIsNotABiFunctionException;
+import io.archura.platform.exception.PreFilterIsNotAUnaryOperatorException;
 import io.archura.platform.exception.ResourceLoadException;
 import io.archura.platform.function.Configurable;
 import io.archura.platform.logging.Logger;
@@ -60,7 +60,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
+import java.util.function.BiFunction;
+import java.util.function.UnaryOperator;
 
 import static java.util.Objects.isNull;
 import static java.util.Objects.nonNull;
@@ -122,20 +123,35 @@ public class ArchuraPlatformApplication {
                         attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), this.globalConfiguration.getLogLevel());
                         rebuildContext(attributes, hashOperations);
 
-                        getGlobalPreFilters().forEach(c -> c.accept(request));
+                        final List<UnaryOperator<ServerRequest>> globalPreFilters = getGlobalPreFilters();
+                        for (UnaryOperator<ServerRequest> preFilter : globalPreFilters) {
+                            getLogger(attributes).debug("Will run global PreFilter: %s", preFilter.getClass().getSimpleName());
+                            request = preFilter.apply(request);
+                        }
                         rebuildContext(attributes, hashOperations);
 
                         String environmentName = String.valueOf(attributes.get(GlobalKeys.REQUEST_ENVIRONMENT.getKey()));
-                        getEnvironmentPreFilters(environmentName).forEach(c -> c.accept(request));
+                        final List<UnaryOperator<ServerRequest>> environmentPreFilters = getEnvironmentPreFilters(environmentName);
+                        for (UnaryOperator<ServerRequest> preFilter : environmentPreFilters) {
+                            getLogger(attributes).debug("Will run environment PreFilter: %s", preFilter.getClass().getSimpleName());
+                            request = preFilter.apply(request);
+                        }
+                        /* REMOVE */
                         attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), EnvironmentKeys.DEFAULT_TENANT_ID.getKey());
                         rebuildContext(attributes, hashOperations);
 
                         String tenantId = String.valueOf(attributes.get(EnvironmentKeys.REQUEST_TENANT_ID.getKey()));
-                        getTenantPreFilters(environmentName, tenantId).forEach(c -> c.accept(request));
+                        final List<UnaryOperator<ServerRequest>> tenantPreFilters = getTenantPreFilters(environmentName, tenantId);
+                        for (UnaryOperator<ServerRequest> preFilter : tenantPreFilters) {
+                            getLogger(attributes).debug("Will run tenant PreFilter: %s", preFilter.getClass().getSimpleName());
+                            request = preFilter.apply(request);
+                        }
 
                         final String routeId = request.attribute(TenantKeys.ROUTE_ID.getKey()).map(String::valueOf).orElse(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
 
-                        final ServerResponse response = getTenantFunctions(environmentName, tenantId, routeId)
+                        final Optional<HandlerFunction<ServerResponse>> tenantFunction = getTenantFunctions(environmentName, tenantId, routeId);
+                        getLogger(attributes).debug("Will run TenantFunction: %s", tenantFunction);
+                        ServerResponse response = tenantFunction
                                 .orElse(r -> ServerResponse
                                         .notFound()
                                         .header(String.format("X-A-NotFound-%s-%s-%s", environmentName, tenantId, routeId))
@@ -143,9 +159,22 @@ public class ArchuraPlatformApplication {
                                 )
                                 .handle(request);
 
-                        getTenantPostFilters(environmentName, tenantId).forEach(bc -> bc.accept(request, response));
-                        getEnvironmentPostFilters(environmentName).forEach(bc -> bc.accept(request, response));
-                        getGlobalPostFilters().forEach(bc -> bc.accept(request, response));
+                        final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> tenantPostFilters = getTenantPostFilters(environmentName, tenantId);
+                        for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : tenantPostFilters) {
+                            getLogger(attributes).debug("Will run tenant PostFilter: %s", postFilter.getClass().getSimpleName());
+                            response = postFilter.apply(request, response);
+                        }
+
+                        final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> environmentPostFilters = getEnvironmentPostFilters(environmentName);
+                        for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : environmentPostFilters) {
+                            getLogger(attributes).debug("Will run environment PostFilter: %s", postFilter.getClass().getSimpleName());
+                            response = postFilter.apply(request, response);
+                        }
+                        final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> globalPostFilters = getGlobalPostFilters();
+                        for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : globalPostFilters) {
+                            getLogger(attributes).debug("Will run global PostFilter: %s", postFilter.getClass().getSimpleName());
+                            response = postFilter.apply(request, response);
+                        }
                         return response;
                     } catch (Exception e) {
                         return this.getErrorResponse(e, request);
@@ -214,7 +243,7 @@ public class ArchuraPlatformApplication {
         return String.format("%s|%s", environmentName, tenantId);
     }
 
-    private List<Consumer<ServerRequest>> getGlobalPreFilters() {
+    private List<UnaryOperator<ServerRequest>> getGlobalPreFilters() {
         return globalConfiguration
                 .getPre()
                 .stream()
@@ -226,7 +255,7 @@ public class ArchuraPlatformApplication {
         return getConfiguration(url, GlobalConfiguration.class);
     }
 
-    private List<Consumer<ServerRequest>> getEnvironmentPreFilters(String environmentName) {
+    private List<UnaryOperator<ServerRequest>> getEnvironmentPreFilters(String environmentName) {
         final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
             String environmentConfigURL = String.format("%s/environments/%s/config.json", configRepositoryUrl, environmentName);
@@ -244,7 +273,7 @@ public class ArchuraPlatformApplication {
         return getConfiguration(url, EnvironmentConfiguration.class);
     }
 
-    private List<Consumer<ServerRequest>> getTenantPreFilters(String environmentName, String tenantId) {
+    private List<UnaryOperator<ServerRequest>> getTenantPreFilters(String environmentName, String tenantId) {
         final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Collections.emptyList();
@@ -266,16 +295,16 @@ public class ArchuraPlatformApplication {
         return getConfiguration(url, TenantConfiguration.class);
     }
 
-    private Consumer<ServerRequest> getPreFilter(String codeServerURL, PreFilterConfiguration configuration, String query) {
+    private UnaryOperator<ServerRequest> getPreFilter(String codeServerURL, PreFilterConfiguration configuration, String query) {
         final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
             final Object object = createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
-            if (Consumer.class.isAssignableFrom(object.getClass())) {
-                @SuppressWarnings("unchecked") final Consumer<ServerRequest> consumer = (Consumer<ServerRequest>) object;
+            if (UnaryOperator.class.isAssignableFrom(object.getClass())) {
+                @SuppressWarnings("unchecked") final UnaryOperator<ServerRequest> consumer = (UnaryOperator<ServerRequest>) object;
                 return consumer;
             } else {
-                throw new PreFilterIsNotAConsumerException(String.format("Resource is not a Consumer, url: %s", resourceUrl));
+                throw new PreFilterIsNotAUnaryOperatorException(String.format("Resource is not a UnaryOperator, url: %s", resourceUrl));
             }
         } catch (Exception e) {
             throw new ResourceLoadException(e);
@@ -338,7 +367,7 @@ public class ArchuraPlatformApplication {
         return object;
     }
 
-    private List<BiConsumer<ServerRequest, ServerResponse>> getTenantPostFilters(String environmentName, String tenantId) {
+    private List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> getTenantPostFilters(String environmentName, String tenantId) {
         final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Collections.emptyList();
@@ -354,7 +383,7 @@ public class ArchuraPlatformApplication {
                 .toList();
     }
 
-    private List<BiConsumer<ServerRequest, ServerResponse>> getEnvironmentPostFilters(String environmentName) {
+    private List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> getEnvironmentPostFilters(String environmentName) {
         final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Collections.emptyList();
@@ -366,7 +395,7 @@ public class ArchuraPlatformApplication {
                 .toList();
     }
 
-    private List<BiConsumer<ServerRequest, ServerResponse>> getGlobalPostFilters() {
+    private List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> getGlobalPostFilters() {
         return globalConfiguration
                 .getPost()
                 .stream()
@@ -374,16 +403,16 @@ public class ArchuraPlatformApplication {
                 .toList();
     }
 
-    private BiConsumer<ServerRequest, ServerResponse> getPostFilter(String codeServerURL, PostFilterConfiguration configuration, String query) {
+    private BiFunction<ServerRequest, ServerResponse, ServerResponse> getPostFilter(String codeServerURL, PostFilterConfiguration configuration, String query) {
         String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
             final Object object = createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
-            if (BiConsumer.class.isAssignableFrom(object.getClass())) {
-                @SuppressWarnings("unchecked") final BiConsumer<ServerRequest, ServerResponse> filter = (BiConsumer<ServerRequest, ServerResponse>) object;
+            if (BiFunction.class.isAssignableFrom(object.getClass())) {
+                @SuppressWarnings("unchecked") final BiFunction<ServerRequest, ServerResponse, ServerResponse> filter = (BiFunction<ServerRequest, ServerResponse, ServerResponse>) object;
                 return filter;
             } else {
-                throw new PostFilterIsNotABiConsumerException(String.format("Resource is not a BiConsumer, url: %s", resourceUrl));
+                throw new PostFilterIsNotABiFunctionException(String.format("Resource is not a BiFunction, url: %s", resourceUrl));
             }
         } catch (Exception e) {
             throw new ResourceLoadException(e);
