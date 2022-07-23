@@ -8,20 +8,10 @@ import io.archura.platform.attribute.GlobalKeys;
 import io.archura.platform.attribute.TenantKeys;
 import io.archura.platform.cache.Cache;
 import io.archura.platform.cache.TenantCache;
-import io.archura.platform.configuration.EnvironmentConfiguration;
-import io.archura.platform.configuration.FunctionConfiguration;
-import io.archura.platform.configuration.GlobalConfiguration;
-import io.archura.platform.configuration.PostFilterConfiguration;
-import io.archura.platform.configuration.PreFilterConfiguration;
-import io.archura.platform.configuration.TenantConfiguration;
+import io.archura.platform.configuration.*;
 import io.archura.platform.context.Context;
 import io.archura.platform.context.RequestContext;
-import io.archura.platform.exception.ConfigurationException;
-import io.archura.platform.exception.ErrorDetail;
-import io.archura.platform.exception.FunctionIsNotAHandlerFunctionException;
-import io.archura.platform.exception.PostFilterIsNotABiFunctionException;
-import io.archura.platform.exception.PreFilterIsNotAUnaryOperatorException;
-import io.archura.platform.exception.ResourceLoadException;
+import io.archura.platform.exception.*;
 import io.archura.platform.function.Configurable;
 import io.archura.platform.logging.Logger;
 import io.archura.platform.logging.LoggerFactory;
@@ -33,12 +23,7 @@ import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactor
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.servlet.function.HandlerFunction;
-import org.springframework.web.servlet.function.RequestPredicates;
-import org.springframework.web.servlet.function.RouterFunction;
-import org.springframework.web.servlet.function.RouterFunctions;
-import org.springframework.web.servlet.function.ServerRequest;
-import org.springframework.web.servlet.function.ServerResponse;
+import org.springframework.web.servlet.function.*;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -49,17 +34,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
-import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.UnaryOperator;
 
@@ -127,14 +105,15 @@ public class ArchuraPlatformApplication {
                         for (UnaryOperator<ServerRequest> preFilter : globalPreFilters) {
                             getLogger(attributes).debug("Will run global PreFilter: %s", preFilter.getClass().getSimpleName());
                             request = preFilter.apply(request);
+                            rebuildContext(attributes, hashOperations);
                         }
-                        rebuildContext(attributes, hashOperations);
 
                         String environmentName = String.valueOf(attributes.get(GlobalKeys.REQUEST_ENVIRONMENT.getKey()));
                         final List<UnaryOperator<ServerRequest>> environmentPreFilters = getEnvironmentPreFilters(environmentName);
                         for (UnaryOperator<ServerRequest> preFilter : environmentPreFilters) {
                             getLogger(attributes).debug("Will run environment PreFilter: %s", preFilter.getClass().getSimpleName());
                             request = preFilter.apply(request);
+                            rebuildContext(attributes, hashOperations);
                         }
                         /* REMOVE */
                         attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), EnvironmentKeys.DEFAULT_TENANT_ID.getKey());
@@ -145,9 +124,16 @@ public class ArchuraPlatformApplication {
                         for (UnaryOperator<ServerRequest> preFilter : tenantPreFilters) {
                             getLogger(attributes).debug("Will run tenant PreFilter: %s", preFilter.getClass().getSimpleName());
                             request = preFilter.apply(request);
+                            rebuildContext(attributes, hashOperations);
                         }
 
                         final String routeId = request.attribute(TenantKeys.ROUTE_ID.getKey()).map(String::valueOf).orElse(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
+                        final List<UnaryOperator<ServerRequest>> routePreFilters = getRoutePreFilters(environmentName, tenantId, routeId);
+                        for (UnaryOperator<ServerRequest> preFilter : routePreFilters) {
+                            getLogger(attributes).debug("Will run route PreFilter: %s", preFilter.getClass().getSimpleName());
+                            request = preFilter.apply(request);
+                            rebuildContext(attributes, hashOperations);
+                        }
 
                         final Optional<HandlerFunction<ServerResponse>> tenantFunction = getTenantFunctions(environmentName, tenantId, routeId);
                         getLogger(attributes).debug("Will run TenantFunction: %s", tenantFunction);
@@ -158,6 +144,12 @@ public class ArchuraPlatformApplication {
                                         .build()
                                 )
                                 .handle(request);
+
+                        final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> routePostFilters = getRoutePostFilters(environmentName, tenantId, routeId);
+                        for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : routePostFilters) {
+                            getLogger(attributes).debug("Will run route PostFilter: %s", postFilter.getClass().getSimpleName());
+                            response = postFilter.apply(request, response);
+                        }
 
                         final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> tenantPostFilters = getTenantPostFilters(environmentName, tenantId);
                         for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : tenantPostFilters) {
@@ -291,6 +283,26 @@ public class ArchuraPlatformApplication {
                 .toList();
     }
 
+    private List<UnaryOperator<ServerRequest>> getRoutePreFilters(String environmentName, String tenantId, String routeId) {
+        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        if (isNull(environmentConfiguration)) {
+            return Collections.emptyList();
+        }
+        final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
+        if (isNull(tenantConfiguration)) {
+            return Collections.emptyList();
+        }
+        final RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
+        if (isNull(routeConfiguration)) {
+            return Collections.emptyList();
+        }
+        return routeConfiguration
+                .getPre()
+                .stream()
+                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
+                .toList();
+    }
+
     private TenantConfiguration getTenantConfiguration(String url) {
         return getConfiguration(url, TenantConfiguration.class);
     }
@@ -320,15 +332,19 @@ public class ArchuraPlatformApplication {
         if (isNull(tenantConfiguration)) {
             return Optional.empty();
         }
-        final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
-        final Map<String, FunctionConfiguration> routeFunctions = tenantConfiguration.getRouteFunctions();
-        final FunctionConfiguration routeFunctionConfig = routeFunctions.get(routeId);
-        if (nonNull(routeFunctionConfig)) {
-            return Optional.of(getFunction(codeRepositoryUrl, routeFunctionConfig, query));
+        RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
+        if (nonNull(routeConfiguration)) {
+            FunctionConfiguration functionConfiguration = routeConfiguration.getFunction();
+            if (nonNull(functionConfiguration)) {
+                return Optional.of(getFunction(codeRepositoryUrl, functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
+            }
         }
-        final FunctionConfiguration catchAllRouteFunctionConfig = routeFunctions.get(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
-        if (nonNull(catchAllRouteFunctionConfig)) {
-            return Optional.of(getFunction(codeRepositoryUrl, catchAllRouteFunctionConfig, query));
+        RouteConfiguration routeConfigurationCatchAll = tenantConfiguration.getRoutes().get(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
+        if (nonNull(routeConfigurationCatchAll)) {
+            FunctionConfiguration functionConfiguration = routeConfigurationCatchAll.getFunction();
+            if (nonNull(functionConfiguration)) {
+                return Optional.of(getFunction(codeRepositoryUrl, functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
+            }
         }
         return Optional.empty();
     }
@@ -365,6 +381,26 @@ public class ArchuraPlatformApplication {
             configurable.setConfiguration(Collections.unmodifiableMap(config));
         }
         return object;
+    }
+
+    private List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> getRoutePostFilters(String environmentName, String tenantId, String routeId) {
+        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        if (isNull(environmentConfiguration)) {
+            return Collections.emptyList();
+        }
+        final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
+        if (isNull(tenantConfiguration)) {
+            return Collections.emptyList();
+        }
+        RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(tenantId);
+        if (isNull(routeConfiguration)) {
+            return Collections.emptyList();
+        }
+        return tenantConfiguration
+                .getPost()
+                .stream()
+                .map(preFilter -> getPostFilter(codeRepositoryUrl, preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
+                .toList();
     }
 
     private List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> getTenantPostFilters(String environmentName, String tenantId) {
