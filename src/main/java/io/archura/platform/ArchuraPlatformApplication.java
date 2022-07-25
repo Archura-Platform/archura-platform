@@ -28,7 +28,7 @@ import io.archura.platform.function.StreamConsumer;
 import io.archura.platform.logging.Logger;
 import io.archura.platform.logging.LoggerFactory;
 import io.archura.platform.stream.Movie;
-import io.archura.platform.stream.StreamSubscription;
+import io.archura.platform.stream.RedisStreamSubscription;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
@@ -91,7 +91,7 @@ public class ArchuraPlatformApplication {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private final StreamSubscription streamSubscription = new StreamSubscription();
+    private final RedisStreamSubscription redisStreamSubscription = new RedisStreamSubscription();
 
     private final GlobalConfiguration globalConfiguration = new GlobalConfiguration();
     private final Map<String, TenantCache> tenantCacheMap = new HashMap<>();
@@ -141,8 +141,8 @@ public class ArchuraPlatformApplication {
                 .route(RequestPredicates.GET("/producer"), request -> {
                     final String environment = "default";
                     final String tenantId = "default";
-                    final String streamKeyFromConfiguration = "key1";
-                    final String streamKey = String.format("%s-%s-%s", environment, tenantId, streamKeyFromConfiguration);
+                    final String topicNameFromConfiguration = "key1";
+                    final String streamKey = String.format("%s-%s-%s", environment, tenantId, topicNameFromConfiguration);
 
 
                     final String movie = objectMapper.writeValueAsString(new Movie("Movie Title", 1977));
@@ -164,33 +164,44 @@ public class ArchuraPlatformApplication {
                             e.printStackTrace();
                         }
                     };
-                    // CREATE STREAM AND GROUP FOR ENV-TENANT-TOPIC
+                    // TRY AND REGISTER SINGLETON BEAN FOR FUNCTION
                     final String environment = "default";
                     final String tenantId = "default";
-                    final String streamKeyFromConfiguration = "key1";
-                    final String streamKey = String.format("%s-%s-%s", environment, tenantId, streamKeyFromConfiguration);
-
-                    final StreamInfo.XInfoGroups groups = streamOperations.groups(streamKey);
-                    if (groups.isEmpty()) {
-                        final String group = streamOperations.createGroup(streamKey, streamKey);
-                        System.out.println("group = " + group);
-                    }
-                    // REGISTER SINGLETON BEAN FOR FUNCTION
-                    final String streamListenerBeanName = String.format("%s-%s", streamKey, movieConsumer.hashCode());
+                    final String topicNameFromConfiguration = "key1";
+                    final String topicName = String.format("%s-%s-%s", environment, tenantId, topicNameFromConfiguration);
+                    final String topicConsumerBeanName = String.format("%s-%s", topicName, movieConsumer.hashCode());
                     try {
-                        beanFactory.isSingleton(streamListenerBeanName);
+                        beanFactory.isSingleton(topicConsumerBeanName);
                     } catch (NoSuchBeanDefinitionException e) {
-                        final StreamListener<String, ObjectRecord<String, byte[]>> streamListener =
+                        //
+                        // IF STREAM TYPE IS REDIS
+                        //
+                        // CREATE STREAM AND GROUP FOR ENV-TENANT-TOPIC
+                        final StreamInfo.XInfoGroups groups = streamOperations.groups(topicName);
+                        if (groups.isEmpty()) {
+                            final String group = streamOperations.createGroup(topicName, topicName);
+                            System.out.println("group = " + group);
+                        }
+                        // CREATE REDIS BEAN
+                        final StreamListener<String, ObjectRecord<String, byte[]>> redisStreamListener =
                                 message -> movieConsumer.consume(message.getId().getValue().getBytes(StandardCharsets.UTF_8), message.getValue());
-                        final Subscription streamFunctionSubscription = streamSubscription.createConsumerSubscription(
+                        final Subscription redisStreamFunctionSubscription = redisStreamSubscription.createConsumerSubscription(
                                 redisConnectionFactory,
-                                streamListener,
-                                streamKey
+                                redisStreamListener,
+                                topicName
                         );
-                        beanFactory.registerSingleton(streamListenerBeanName, streamFunctionSubscription);
+                        // REGISTER REDIS BEAN
+                        beanFactory.registerSingleton(topicConsumerBeanName, redisStreamFunctionSubscription);
+                        //
+                        //
+                        //
+                        //
+                        //
+                        // IF STREAM TYPE IS KAFKA
+                        //
                     }
-                    final Object streamFunctionSubscription = beanFactory.getBean(streamListenerBeanName);
-                    System.out.println("streamListenerBeanName = " + streamListenerBeanName + " streamFunctionSubscription = " + streamFunctionSubscription);
+                    final Object topicConsumerBean = beanFactory.getBean(topicConsumerBeanName);
+                    System.out.println("topicConsumerBeanName = " + topicConsumerBeanName + " topicConsumerBean = " + topicConsumerBean);
                     return ServerResponse.ok().build();
                 })
                 .route(RequestPredicates.all(), request -> {
