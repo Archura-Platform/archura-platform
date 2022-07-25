@@ -24,6 +24,7 @@ import io.archura.platform.exception.PostFilterIsNotABiFunctionException;
 import io.archura.platform.exception.PreFilterIsNotAUnaryOperatorException;
 import io.archura.platform.exception.ResourceLoadException;
 import io.archura.platform.function.Configurable;
+import io.archura.platform.function.StreamConsumer;
 import io.archura.platform.logging.Logger;
 import io.archura.platform.logging.LoggerFactory;
 import io.archura.platform.stream.Movie;
@@ -154,15 +155,16 @@ public class ArchuraPlatformApplication {
                     return ServerResponse.ok().build();
                 })
                 .route(RequestPredicates.GET("/consumer"), request -> {
-                    // CREATE SUBSCRIPTION FOR ENV-TENANT-TOPIC
-                    final StreamListener<String, ObjectRecord<String, byte[]>> streamConsumerFunction = message -> {
+                    // CREATE FUNCTION FROM CONFIGURATION
+                    final StreamConsumer movieConsumer = (key, value) -> {
                         try {
-                            final Movie movie = new ObjectMapper().readValue(message.getValue(), Movie.class);
-                            System.out.println("movie = " + movie);
+                            final Movie movie = new ObjectMapper().readValue(value, Movie.class);
+                            System.out.printf("key: %s, value: %s%n", new String(key), movie);
                         } catch (IOException e) {
                             e.printStackTrace();
                         }
                     };
+                    // CREATE STREAM AND GROUP FOR ENV-TENANT-TOPIC
                     final String environment = "default";
                     final String tenantId = "default";
                     final String streamKeyFromConfiguration = "key1";
@@ -173,20 +175,22 @@ public class ArchuraPlatformApplication {
                         final String group = streamOperations.createGroup(streamKey, streamKey);
                         System.out.println("group = " + group);
                     }
-
-                    final Subscription streamFunctionSubscription = streamSubscription.createConsumerSubscription(
-                            redisConnectionFactory,
-                            streamConsumerFunction,
-                            streamKey
-                    );
-                    // REGISTER SINGLETON BEAN
-                    final String streamConsumerFunctionName = String.format("%s-%s", streamKey, streamConsumerFunction.hashCode());
+                    // REGISTER SINGLETON BEAN FOR FUNCTION
+                    final String streamListenerBeanName = String.format("%s-%s", streamKey, movieConsumer.hashCode());
                     try {
-                        beanFactory.isSingleton(streamConsumerFunctionName);
+                        beanFactory.isSingleton(streamListenerBeanName);
                     } catch (NoSuchBeanDefinitionException e) {
-                        beanFactory.registerSingleton(streamConsumerFunctionName, streamFunctionSubscription);
+                        final StreamListener<String, ObjectRecord<String, byte[]>> streamListener =
+                                message -> movieConsumer.consume(message.getId().getValue().getBytes(StandardCharsets.UTF_8), message.getValue());
+                        final Subscription streamFunctionSubscription = streamSubscription.createConsumerSubscription(
+                                redisConnectionFactory,
+                                streamListener,
+                                streamKey
+                        );
+                        beanFactory.registerSingleton(streamListenerBeanName, streamFunctionSubscription);
                     }
-                    System.out.println("streamConsumerFunctionName = " + streamConsumerFunctionName + " streamFunctionSubscription = " + streamFunctionSubscription);
+                    final Object streamFunctionSubscription = beanFactory.getBean(streamListenerBeanName);
+                    System.out.println("streamListenerBeanName = " + streamListenerBeanName + " streamFunctionSubscription = " + streamFunctionSubscription);
                     return ServerResponse.ok().build();
                 })
                 .route(RequestPredicates.all(), request -> {
