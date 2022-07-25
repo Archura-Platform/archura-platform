@@ -8,22 +8,50 @@ import io.archura.platform.attribute.GlobalKeys;
 import io.archura.platform.attribute.TenantKeys;
 import io.archura.platform.cache.Cache;
 import io.archura.platform.cache.TenantCache;
-import io.archura.platform.configuration.*;
+import io.archura.platform.configuration.EnvironmentConfiguration;
+import io.archura.platform.configuration.FunctionConfiguration;
+import io.archura.platform.configuration.GlobalConfiguration;
+import io.archura.platform.configuration.PostFilterConfiguration;
+import io.archura.platform.configuration.PreFilterConfiguration;
+import io.archura.platform.configuration.RouteConfiguration;
+import io.archura.platform.configuration.TenantConfiguration;
 import io.archura.platform.context.Context;
 import io.archura.platform.context.RequestContext;
-import io.archura.platform.exception.*;
+import io.archura.platform.exception.ConfigurationException;
+import io.archura.platform.exception.ErrorDetail;
+import io.archura.platform.exception.FunctionIsNotAHandlerFunctionException;
+import io.archura.platform.exception.PostFilterIsNotABiFunctionException;
+import io.archura.platform.exception.PreFilterIsNotAUnaryOperatorException;
+import io.archura.platform.exception.ResourceLoadException;
 import io.archura.platform.function.Configurable;
 import io.archura.platform.logging.Logger;
 import io.archura.platform.logging.LoggerFactory;
+import io.archura.platform.stream.Movie;
+import io.archura.platform.stream.StreamSubscription;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.embedded.tomcat.TomcatProtocolHandlerCustomizer;
 import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.stream.ObjectRecord;
+import org.springframework.data.redis.connection.stream.RecordId;
+import org.springframework.data.redis.connection.stream.StreamInfo;
+import org.springframework.data.redis.connection.stream.StreamRecords;
 import org.springframework.data.redis.core.HashOperations;
+import org.springframework.data.redis.core.StreamOperations;
+import org.springframework.data.redis.stream.StreamListener;
+import org.springframework.data.redis.stream.Subscription;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.servlet.function.*;
+import org.springframework.web.servlet.function.HandlerFunction;
+import org.springframework.web.servlet.function.RequestPredicates;
+import org.springframework.web.servlet.function.RouterFunction;
+import org.springframework.web.servlet.function.RouterFunctions;
+import org.springframework.web.servlet.function.ServerRequest;
+import org.springframework.web.servlet.function.ServerResponse;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -33,8 +61,15 @@ import java.net.URLClassLoader;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -54,6 +89,8 @@ public class ArchuraPlatformApplication {
     private String codeRepositoryUrl;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private final StreamSubscription streamSubscription = new StreamSubscription();
 
     private final GlobalConfiguration globalConfiguration = new GlobalConfiguration();
     private final Map<String, TenantCache> tenantCacheMap = new HashMap<>();
@@ -92,9 +129,66 @@ public class ArchuraPlatformApplication {
     }
 
     @Bean
-    public RouterFunction<ServerResponse> routes(HashOperations<String, String, Map<String, Object>> hashOperations) {
+    public RouterFunction<ServerResponse> routes(
+            final HashOperations<String, String, Map<String, Object>> hashOperations,
+            final StreamOperations<String, Object, Object> streamOperations,
+            final RedisConnectionFactory redisConnectionFactory,
+            final ConfigurableBeanFactory beanFactory
+    ) {
         loadGlobalConfiguration();
         return RouterFunctions.route()
+                .route(RequestPredicates.GET("/producer"), request -> {
+                    final String environment = "default";
+                    final String tenantId = "default";
+                    final String streamKeyFromConfiguration = "key1";
+                    final String streamKey = String.format("%s-%s-%s", environment, tenantId, streamKeyFromConfiguration);
+
+
+                    final String movie = objectMapper.writeValueAsString(new Movie("Movie Title", 1977));
+                    byte[] bytes = movie.getBytes(StandardCharsets.UTF_8);
+                    ObjectRecord<String, byte[]> streamRecord = StreamRecords.newRecord()
+                            .ofObject(bytes)
+                            .withStreamKey(streamKey);
+                    final RecordId add = streamOperations.add(streamRecord);
+                    System.out.println("streamOperations add = " + add);
+                    return ServerResponse.ok().build();
+                })
+                .route(RequestPredicates.GET("/consumer"), request -> {
+                    // CREATE SUBSCRIPTION FOR ENV-TENANT-TOPIC
+                    final StreamListener<String, ObjectRecord<String, byte[]>> streamConsumerFunction = message -> {
+                        try {
+                            final Movie movie = new ObjectMapper().readValue(message.getValue(), Movie.class);
+                            System.out.println("movie = " + movie);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    };
+                    final String environment = "default";
+                    final String tenantId = "default";
+                    final String streamKeyFromConfiguration = "key1";
+                    final String streamKey = String.format("%s-%s-%s", environment, tenantId, streamKeyFromConfiguration);
+
+                    final StreamInfo.XInfoGroups groups = streamOperations.groups(streamKey);
+                    if (groups.isEmpty()) {
+                        final String group = streamOperations.createGroup(streamKey, streamKey);
+                        System.out.println("group = " + group);
+                    }
+
+                    final Subscription streamFunctionSubscription = streamSubscription.createConsumerSubscription(
+                            redisConnectionFactory,
+                            streamConsumerFunction,
+                            streamKey
+                    );
+                    // REGISTER SINGLETON BEAN
+                    final String streamConsumerFunctionName = String.format("%s-%s", streamKey, streamConsumerFunction.hashCode());
+                    try {
+                        beanFactory.isSingleton(streamConsumerFunctionName);
+                    } catch (NoSuchBeanDefinitionException e) {
+                        beanFactory.registerSingleton(streamConsumerFunctionName, streamFunctionSubscription);
+                    }
+                    System.out.println("streamConsumerFunctionName = " + streamConsumerFunctionName + " streamFunctionSubscription = " + streamFunctionSubscription);
+                    return ServerResponse.ok().build();
+                })
                 .route(RequestPredicates.all(), request -> {
                     try {
                         final Map<String, Object> attributes = request.attributes();

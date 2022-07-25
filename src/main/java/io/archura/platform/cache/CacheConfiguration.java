@@ -11,6 +11,8 @@ import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StreamOperations;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
@@ -68,6 +70,11 @@ public class CacheConfiguration {
     @Bean
     public HashOperations<String, String, Map<String, Object>> hashOperations(RedisTemplate<String, Map<String, Object>> redisTemplate) {
         return redisTemplate.opsForHash();
+    }
+
+    @Bean
+    public StreamOperations<String, Object, Object> streamOperations(StringRedisTemplate stringRedisTemplate) {
+        return stringRedisTemplate.opsForStream();
     }
 
 }
