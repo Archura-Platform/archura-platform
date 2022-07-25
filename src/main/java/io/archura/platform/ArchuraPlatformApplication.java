@@ -1,5 +1,6 @@
 package io.archura.platform;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,11 +26,13 @@ import io.archura.platform.exception.PreFilterIsNotAUnaryOperatorException;
 import io.archura.platform.exception.ResourceLoadException;
 import io.archura.platform.function.Configurable;
 import io.archura.platform.function.StreamConsumer;
+import io.archura.platform.function.StreamProducer;
 import io.archura.platform.logging.Logger;
 import io.archura.platform.logging.LoggerFactory;
 import io.archura.platform.stream.Movie;
 import io.archura.platform.stream.RedisStreamSubscription;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.boot.SpringApplication;
@@ -64,13 +67,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -116,9 +113,15 @@ public class ArchuraPlatformApplication {
 
     @Bean
     public TomcatProtocolHandlerCustomizer<?> tomcatProtocolHandlerCustomizer() {
+        final ExecutorService executorService = getExecutorService();
+        return protocolHandler -> protocolHandler.setExecutor(executorService);
+    }
+
+    @Bean("VirtualExecutorService")
+    public ExecutorService getExecutorService() {
         final ThreadFactory factory = Thread.ofVirtual().name("VIRTUAL-THREAD").factory();
         final ExecutorService executorService = Executors.newCachedThreadPool(factory);
-        return protocolHandler -> protocolHandler.setExecutor(executorService);
+        return executorService;
     }
 
     private void loadGlobalConfiguration() {
@@ -134,7 +137,8 @@ public class ArchuraPlatformApplication {
             final HashOperations<String, String, Map<String, Object>> hashOperations,
             final StreamOperations<String, Object, Object> streamOperations,
             final RedisConnectionFactory redisConnectionFactory,
-            final ConfigurableBeanFactory beanFactory
+            final ConfigurableBeanFactory beanFactory,
+            final @Qualifier("VirtualExecutorService") ExecutorService executorService
     ) {
         loadGlobalConfiguration();
         return RouterFunctions.route()
@@ -143,23 +147,44 @@ public class ArchuraPlatformApplication {
                     final String tenantId = "default";
                     final String topicNameFromConfiguration = "key1";
                     final String streamKey = String.format("%s-%s-%s", environment, tenantId, topicNameFromConfiguration);
+                    // CREATE CONTEXT
+                    final HashMap<String, Object> attributes = new HashMap<>();
+                    attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), environment);
+                    attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), tenantId);
+                    rebuildContext(attributes, hashOperations);
+                    final Context context = (Context) attributes.get(Context.class.getSimpleName());
+                    final Logger logger = context.getLogger();
+                    final StreamProducer movieProducer = c -> {
+                        final ObjectMapper objectMapper = c.getObjectMapper();
+                        final Movie movie = new Movie("Movie Title", 1977);
+                        String movieString = "";
+                        try {
+                            movieString = objectMapper.writeValueAsString(movie);
+                        } catch (JsonProcessingException e) {
+                            e.printStackTrace();
+                        }
+                        final String key = String.valueOf(System.currentTimeMillis());
+                        return new AbstractMap.SimpleEntry<>(
+                                key.getBytes(StandardCharsets.UTF_8),
+                                movieString.getBytes(StandardCharsets.UTF_8));
+                    };
+                    Map.Entry<byte[], byte[]> entry = movieProducer.produce(context);
 
-
-                    final String movie = objectMapper.writeValueAsString(new Movie("Movie Title", 1977));
-                    byte[] bytes = movie.getBytes(StandardCharsets.UTF_8);
                     ObjectRecord<String, byte[]> streamRecord = StreamRecords.newRecord()
-                            .ofObject(bytes)
+                            .ofObject(entry.getValue())
                             .withStreamKey(streamKey);
                     final RecordId add = streamOperations.add(streamRecord);
-                    System.out.println("streamOperations add = " + add);
+                    logger.info("streamOperations add = " + add);
                     return ServerResponse.ok().build();
                 })
                 .route(RequestPredicates.GET("/consumer"), request -> {
                     // CREATE FUNCTION FROM CONFIGURATION
-                    final StreamConsumer movieConsumer = (key, value) -> {
+                    final StreamConsumer movieConsumer = (context, key, value) -> {
                         try {
-                            final Movie movie = new ObjectMapper().readValue(value, Movie.class);
-                            System.out.printf("key: %s, value: %s%n", new String(key), movie);
+                            final Logger logger = context.getLogger();
+                            final ObjectMapper objectMapper = context.getObjectMapper();
+                            final Movie movie = objectMapper.readValue(value, Movie.class);
+                            logger.info("key: %s, value: %s", new String(key), movie);
                         } catch (IOException e) {
                             e.printStackTrace();
                         }
@@ -170,6 +195,14 @@ public class ArchuraPlatformApplication {
                     final String topicNameFromConfiguration = "key1";
                     final String topicName = String.format("%s-%s-%s", environment, tenantId, topicNameFromConfiguration);
                     final String topicConsumerBeanName = String.format("%s-%s", topicName, movieConsumer.hashCode());
+                    // CREATE CONTEXT
+                    final HashMap<String, Object> attributes = new HashMap<>();
+                    attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), environment);
+                    attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), tenantId);
+                    rebuildContext(attributes, hashOperations);
+                    final Context context = (Context) attributes.get(Context.class.getSimpleName());
+                    final Logger logger = context.getLogger();
+                    // CREATE BEAN
                     try {
                         beanFactory.isSingleton(topicConsumerBeanName);
                     } catch (NoSuchBeanDefinitionException e) {
@@ -180,15 +213,16 @@ public class ArchuraPlatformApplication {
                         final StreamInfo.XInfoGroups groups = streamOperations.groups(topicName);
                         if (groups.isEmpty()) {
                             final String group = streamOperations.createGroup(topicName, topicName);
-                            System.out.println("group = " + group);
+                            logger.info("group = " + group);
                         }
                         // CREATE REDIS BEAN
                         final StreamListener<String, ObjectRecord<String, byte[]>> redisStreamListener =
-                                message -> movieConsumer.consume(message.getId().getValue().getBytes(StandardCharsets.UTF_8), message.getValue());
+                                message -> movieConsumer.consume(context, message.getId().getValue().getBytes(StandardCharsets.UTF_8), message.getValue());
                         final Subscription redisStreamFunctionSubscription = redisStreamSubscription.createConsumerSubscription(
                                 redisConnectionFactory,
                                 redisStreamListener,
-                                topicName
+                                topicName,
+                                executorService
                         );
                         // REGISTER REDIS BEAN
                         beanFactory.registerSingleton(topicConsumerBeanName, redisStreamFunctionSubscription);
@@ -201,7 +235,7 @@ public class ArchuraPlatformApplication {
                         //
                     }
                     final Object topicConsumerBean = beanFactory.getBean(topicConsumerBeanName);
-                    System.out.println("topicConsumerBeanName = " + topicConsumerBeanName + " topicConsumerBean = " + topicConsumerBean);
+                    logger.info("topicConsumerBeanName = " + topicConsumerBeanName + " topicConsumerBean = " + topicConsumerBean);
                     return ServerResponse.ok().build();
                 })
                 .route(RequestPredicates.all(), request -> {

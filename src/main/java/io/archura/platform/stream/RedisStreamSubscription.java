@@ -13,15 +13,16 @@ import org.springframework.data.redis.stream.Subscription;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Duration;
+import java.util.concurrent.ExecutorService;
 
 public class RedisStreamSubscription {
 
     public Subscription createConsumerSubscription(
             final RedisConnectionFactory redisConnectionFactory,
             final StreamListener<String, ObjectRecord<String, byte[]>> streamListener,
-            final String streamKey
-    ) {
-        final StreamMessageListenerContainer<String, ObjectRecord<String, byte[]>> listenerContainer = streamMessageListenerContainer(redisConnectionFactory);
+            final String streamKey,
+            ExecutorService executorService) {
+        final StreamMessageListenerContainer<String, ObjectRecord<String, byte[]>> listenerContainer = streamMessageListenerContainer(redisConnectionFactory, executorService);
         final Consumer consumer = Consumer.from(streamKey, getHostName());
         final StreamOffset<String> streamOffset = StreamOffset.create(streamKey, ReadOffset.lastConsumed());
         final Subscription subscription = listenerContainer.receive(consumer, streamOffset, streamListener);
@@ -30,13 +31,14 @@ public class RedisStreamSubscription {
     }
 
     private StreamMessageListenerContainer<String, ObjectRecord<String, byte[]>> streamMessageListenerContainer(
-            final RedisConnectionFactory redisConnectionFactory
-    ) {
+            final RedisConnectionFactory redisConnectionFactory,
+            ExecutorService executorService) {
         final StreamMessageListenerContainer.StreamMessageListenerContainerOptions<String, ObjectRecord<String, byte[]>> options = StreamMessageListenerContainer
                 .StreamMessageListenerContainerOptions
                 .builder()
                 .pollTimeout(Duration.ofSeconds(1))
                 .targetType(byte[].class)
+                .executor(executorService)
                 .build();
         return StreamMessageListenerContainer.create(redisConnectionFactory, options);
     }
