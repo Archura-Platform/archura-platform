@@ -369,7 +369,7 @@ public class ArchuraPlatformApplication {
             throws IOException, ReflectiveOperationException {
         if (isNull(remoteClassMap.get(resourceUrl))) {
             final URL url = new URL(resourceKey);
-            final URLClassLoader classLoader = new URLClassLoader(new URL[]{url});
+            final URLClassLoader classLoader = new URLClassLoader(new URL[]{url}, Thread.currentThread().getContextClassLoader());
             final Class<?> remoteClass = Class.forName(className, true, classLoader);
             remoteClassMap.put(resourceUrl, remoteClass);
         }
@@ -392,7 +392,7 @@ public class ArchuraPlatformApplication {
         if (isNull(tenantConfiguration)) {
             return Collections.emptyList();
         }
-        RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(tenantId);
+        RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
         if (isNull(routeConfiguration)) {
             return Collections.emptyList();
         }
