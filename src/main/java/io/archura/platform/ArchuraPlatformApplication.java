@@ -17,6 +17,7 @@ import io.archura.platform.exception.FunctionIsNotAHandlerFunctionException;
 import io.archura.platform.exception.PostFilterIsNotABiFunctionException;
 import io.archura.platform.exception.PreFilterIsNotAUnaryOperatorException;
 import io.archura.platform.exception.ResourceLoadException;
+import io.archura.platform.fc.configuration.IFFEConfiguration;
 import io.archura.platform.fc.function.StreamConsumer;
 import io.archura.platform.fc.function.StreamProducer;
 import io.archura.platform.function.Configurable;
@@ -125,17 +126,52 @@ public class ArchuraPlatformApplication {
         return Executors.newCachedThreadPool(factory);
     }
 
+    @Bean
+    public ApplicationRunner prepareIFFEConfiguration() {
+        return args -> loadIFFEConfiguration();
+    }
+
+    private void loadIFFEConfiguration() {
+        final String iffeConfigURL = String.format("%s/functional-core/iife/config.json", configRepositoryUrl);
+        final IFFEConfiguration iffeConfig = getIFFEConfiguration(iffeConfigURL);
+        final IFFEConfiguration.Configuration config = iffeConfig.getConfig(); // set log level
+        final Map<String, IFFEConfiguration.EnvironmentConfiguration> environments = iffeConfig.getEnvironments();
+        for (Map.Entry<String, IFFEConfiguration.EnvironmentConfiguration> environmentEntry : environments.entrySet()) {
+            final String environmentName = environmentEntry.getKey();
+            final IFFEConfiguration.EnvironmentConfiguration environmentConfiguration = environmentEntry.getValue();
+            final IFFEConfiguration.Configuration environmentConfig = environmentConfiguration.getConfig(); // set log level
+            final Map<String, IFFEConfiguration.TenantConfiguration> tenants = environmentConfiguration.getTenants();
+            for (Map.Entry<String, IFFEConfiguration.TenantConfiguration> tenantEntry : tenants.entrySet()) {
+                final String tenantId = tenantEntry.getKey();
+                final IFFEConfiguration.TenantConfiguration tenantConfiguration = tenantEntry.getValue();
+                final IFFEConfiguration.Configuration tenantConfig = tenantConfiguration.getConfig(); // set log level
+                final List<IFFEConfiguration.FunctionConfiguration> functions = tenantConfiguration.getFunctions();
+                for (IFFEConfiguration.FunctionConfiguration functionConfiguration : functions) {
+                    final JsonNode functionConfig = functionConfiguration.getConfig(); // set log level
+                    final String functionName = functionConfiguration.getName();
+                    final String functionVersion = functionConfiguration.getVersion();
+                    // create function
+                    // invoke function
+                }
+            }
+        }
+    }
+
+    private IFFEConfiguration getIFFEConfiguration(String url) {
+        return getConfiguration(url, IFFEConfiguration.class);
+    }
+
+    @Bean
+    public ApplicationRunner prepareGlobalConfiguration() {
+        return args -> loadGlobalConfiguration();
+    }
+
     private void loadGlobalConfiguration() {
         final String globalConfigURL = String.format("%s/imperative-shell/global/config.json", configRepositoryUrl);
         final GlobalConfiguration globalConfig = getGlobalConfiguration(globalConfigURL);
         this.globalConfiguration.setPre(globalConfig.getPre());
         this.globalConfiguration.setPost(globalConfig.getPost());
         this.globalConfiguration.setConfig(globalConfig.getConfig());
-    }
-
-    @Bean
-    public ApplicationRunner prepareGlobalConfiguration() {
-        return args -> loadGlobalConfiguration();
     }
 
     @Bean
