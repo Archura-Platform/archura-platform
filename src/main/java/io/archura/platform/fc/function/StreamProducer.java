@@ -1,4 +1,4 @@
-package io.archura.platform.function;
+package io.archura.platform.fc.function;
 
 import io.archura.platform.context.Context;
 

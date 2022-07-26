@@ -9,13 +9,6 @@ import io.archura.platform.attribute.GlobalKeys;
 import io.archura.platform.attribute.TenantKeys;
 import io.archura.platform.cache.Cache;
 import io.archura.platform.cache.TenantCache;
-import io.archura.platform.configuration.EnvironmentConfiguration;
-import io.archura.platform.configuration.FunctionConfiguration;
-import io.archura.platform.configuration.GlobalConfiguration;
-import io.archura.platform.configuration.PostFilterConfiguration;
-import io.archura.platform.configuration.PreFilterConfiguration;
-import io.archura.platform.configuration.RouteConfiguration;
-import io.archura.platform.configuration.TenantConfiguration;
 import io.archura.platform.context.Context;
 import io.archura.platform.context.RequestContext;
 import io.archura.platform.exception.ConfigurationException;
@@ -24,9 +17,10 @@ import io.archura.platform.exception.FunctionIsNotAHandlerFunctionException;
 import io.archura.platform.exception.PostFilterIsNotABiFunctionException;
 import io.archura.platform.exception.PreFilterIsNotAUnaryOperatorException;
 import io.archura.platform.exception.ResourceLoadException;
+import io.archura.platform.fc.function.StreamConsumer;
+import io.archura.platform.fc.function.StreamProducer;
 import io.archura.platform.function.Configurable;
-import io.archura.platform.function.StreamConsumer;
-import io.archura.platform.function.StreamProducer;
+import io.archura.platform.ish.configuration.GlobalConfiguration;
 import io.archura.platform.logging.Logger;
 import io.archura.platform.logging.LoggerFactory;
 import io.archura.platform.stream.Movie;
@@ -35,6 +29,7 @@ import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.embedded.tomcat.TomcatProtocolHandlerCustomizer;
@@ -67,7 +62,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.*;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -120,16 +122,20 @@ public class ArchuraPlatformApplication {
     @Bean("VirtualExecutorService")
     public ExecutorService getExecutorService() {
         final ThreadFactory factory = Thread.ofVirtual().name("VIRTUAL-THREAD").factory();
-        final ExecutorService executorService = Executors.newCachedThreadPool(factory);
-        return executorService;
+        return Executors.newCachedThreadPool(factory);
     }
 
     private void loadGlobalConfiguration() {
-        final String globalConfigURL = String.format("%s/global/config.json", configRepositoryUrl);
+        final String globalConfigURL = String.format("%s/imperative-shell/global/config.json", configRepositoryUrl);
         final GlobalConfiguration globalConfig = getGlobalConfiguration(globalConfigURL);
         this.globalConfiguration.setPre(globalConfig.getPre());
         this.globalConfiguration.setPost(globalConfig.getPost());
-        this.globalConfiguration.setLogLevel(globalConfig.getLogLevel());
+        this.globalConfiguration.setConfig(globalConfig.getConfig());
+    }
+
+    @Bean
+    public ApplicationRunner prepareGlobalConfiguration() {
+        return args -> loadGlobalConfiguration();
     }
 
     @Bean
@@ -140,7 +146,6 @@ public class ArchuraPlatformApplication {
             final ConfigurableBeanFactory beanFactory,
             final @Qualifier("VirtualExecutorService") ExecutorService executorService
     ) {
-        loadGlobalConfiguration();
         return RouterFunctions.route()
                 .route(RequestPredicates.GET("/producer"), request -> {
                     final String environment = "default";
@@ -241,7 +246,7 @@ public class ArchuraPlatformApplication {
                 .route(RequestPredicates.all(), request -> {
                     try {
                         final Map<String, Object> attributes = request.attributes();
-                        attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), this.globalConfiguration.getLogLevel());
+                        attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), this.globalConfiguration.getConfig().getLogLevel());
                         rebuildContext(attributes, hashOperations);
 
                         final List<UnaryOperator<ServerRequest>> globalPreFilters = getGlobalPreFilters();
@@ -391,10 +396,10 @@ public class ArchuraPlatformApplication {
     }
 
     private List<UnaryOperator<ServerRequest>> getEnvironmentPreFilters(String environmentName) {
-        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
-            String environmentConfigURL = String.format("%s/environments/%s/config.json", configRepositoryUrl, environmentName);
-            EnvironmentConfiguration environmentConfig = getEnvironmentConfiguration(environmentConfigURL);
+            String environmentConfigURL = String.format("%s/imperative-shell/environments/%s/config.json", configRepositoryUrl, environmentName);
+            GlobalConfiguration.EnvironmentConfiguration environmentConfig = getEnvironmentConfiguration(environmentConfigURL);
             globalConfiguration.getEnvironments().put(environmentName, environmentConfig);
         }
         return globalConfiguration.getEnvironments().get(environmentName)
@@ -404,19 +409,19 @@ public class ArchuraPlatformApplication {
                 .toList();
     }
 
-    private EnvironmentConfiguration getEnvironmentConfiguration(String url) {
-        return getConfiguration(url, EnvironmentConfiguration.class);
+    private GlobalConfiguration.EnvironmentConfiguration getEnvironmentConfiguration(String url) {
+        return getConfiguration(url, GlobalConfiguration.EnvironmentConfiguration.class);
     }
 
     private List<UnaryOperator<ServerRequest>> getTenantPreFilters(String environmentName, String tenantId) {
-        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Collections.emptyList();
         }
-        final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
+        final GlobalConfiguration.TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
         if (isNull(tenantConfiguration)) {
-            String tenantConfigURL = String.format("%s/environments/%s/tenants/%s/config.json", configRepositoryUrl, environmentName, tenantId);
-            TenantConfiguration tenantConfig = getTenantConfiguration(tenantConfigURL);
+            String tenantConfigURL = String.format("%s/imperative-shell/environments/%s/tenants/%s/config.json", configRepositoryUrl, environmentName, tenantId);
+            GlobalConfiguration.TenantConfiguration tenantConfig = getTenantConfiguration(tenantConfigURL);
             environmentConfiguration.getTenants().put(tenantId, tenantConfig);
         }
         return environmentConfiguration.getTenants().get(tenantId)
@@ -427,15 +432,15 @@ public class ArchuraPlatformApplication {
     }
 
     private List<UnaryOperator<ServerRequest>> getRoutePreFilters(String environmentName, String tenantId, String routeId) {
-        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Collections.emptyList();
         }
-        final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
+        final GlobalConfiguration.TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
         if (isNull(tenantConfiguration)) {
             return Collections.emptyList();
         }
-        final RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
+        final GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
         if (isNull(routeConfiguration)) {
             return Collections.emptyList();
         }
@@ -446,11 +451,11 @@ public class ArchuraPlatformApplication {
                 .toList();
     }
 
-    private TenantConfiguration getTenantConfiguration(String url) {
-        return getConfiguration(url, TenantConfiguration.class);
+    private GlobalConfiguration.TenantConfiguration getTenantConfiguration(String url) {
+        return getConfiguration(url, GlobalConfiguration.TenantConfiguration.class);
     }
 
-    private UnaryOperator<ServerRequest> getPreFilter(String codeServerURL, PreFilterConfiguration configuration, String query) {
+    private UnaryOperator<ServerRequest> getPreFilter(String codeServerURL, GlobalConfiguration.PreFilterConfiguration configuration, String query) {
         final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
@@ -467,24 +472,24 @@ public class ArchuraPlatformApplication {
     }
 
     private Optional<HandlerFunction<ServerResponse>> getTenantFunctions(String environmentName, String tenantId, String routeId) {
-        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Optional.empty();
         }
-        final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
+        final GlobalConfiguration.TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
         if (isNull(tenantConfiguration)) {
             return Optional.empty();
         }
-        RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
+        GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
         if (nonNull(routeConfiguration)) {
-            FunctionConfiguration functionConfiguration = routeConfiguration.getFunction();
+            GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration functionConfiguration = routeConfiguration.getFunction();
             if (nonNull(functionConfiguration)) {
                 return Optional.of(getFunction(codeRepositoryUrl, functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
             }
         }
-        RouteConfiguration routeConfigurationCatchAll = tenantConfiguration.getRoutes().get(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
+        GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfigurationCatchAll = tenantConfiguration.getRoutes().get(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
         if (nonNull(routeConfigurationCatchAll)) {
-            FunctionConfiguration functionConfiguration = routeConfigurationCatchAll.getFunction();
+            GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration functionConfiguration = routeConfigurationCatchAll.getFunction();
             if (nonNull(functionConfiguration)) {
                 return Optional.of(getFunction(codeRepositoryUrl, functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
             }
@@ -492,7 +497,7 @@ public class ArchuraPlatformApplication {
         return Optional.empty();
     }
 
-    private HandlerFunction<ServerResponse> getFunction(String codeServerURL, FunctionConfiguration configuration, String query) {
+    private HandlerFunction<ServerResponse> getFunction(String codeServerURL, GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration configuration, String query) {
         final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
@@ -527,15 +532,15 @@ public class ArchuraPlatformApplication {
     }
 
     private List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> getRoutePostFilters(String environmentName, String tenantId, String routeId) {
-        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Collections.emptyList();
         }
-        final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
+        final GlobalConfiguration.TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
         if (isNull(tenantConfiguration)) {
             return Collections.emptyList();
         }
-        RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
+        GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
         if (isNull(routeConfiguration)) {
             return Collections.emptyList();
         }
@@ -547,11 +552,11 @@ public class ArchuraPlatformApplication {
     }
 
     private List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> getTenantPostFilters(String environmentName, String tenantId) {
-        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Collections.emptyList();
         }
-        final TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
+        final GlobalConfiguration.TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
         if (isNull(tenantConfiguration)) {
             return Collections.emptyList();
         }
@@ -563,7 +568,7 @@ public class ArchuraPlatformApplication {
     }
 
     private List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> getEnvironmentPostFilters(String environmentName) {
-        final EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
+        final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = globalConfiguration.getEnvironments().get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Collections.emptyList();
         }
@@ -582,7 +587,7 @@ public class ArchuraPlatformApplication {
                 .toList();
     }
 
-    private BiFunction<ServerRequest, ServerResponse, ServerResponse> getPostFilter(String codeServerURL, PostFilterConfiguration configuration, String query) {
+    private BiFunction<ServerRequest, ServerResponse, ServerResponse> getPostFilter(String codeServerURL, GlobalConfiguration.PostFilterConfiguration configuration, String query) {
         String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
@@ -612,7 +617,8 @@ public class ArchuraPlatformApplication {
                 throw new ConfigurationException(errorMessage);
             }
         } catch (IOException | InterruptedException e) {
-            throw new ConfigurationException(e);
+            String errorMessage = String.format("Error while reading configuration class: '%s' from url: '%s', error: %s", tClass.getSimpleName(), url, e.getMessage());
+            throw new ConfigurationException(errorMessage, e);
         }
     }
 
