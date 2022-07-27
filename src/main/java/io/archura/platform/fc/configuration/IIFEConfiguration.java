@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 @Data
-public class IFFEConfiguration {
+public class IIFEConfiguration {
     private Map<String, EnvironmentConfiguration> environments = new HashMap<>();
     private Configuration config = new Configuration();
 

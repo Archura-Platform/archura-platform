@@ -17,7 +17,7 @@ import io.archura.platform.exception.FunctionIsNotAHandlerFunctionException;
 import io.archura.platform.exception.PostFilterIsNotABiFunctionException;
 import io.archura.platform.exception.PreFilterIsNotAUnaryOperatorException;
 import io.archura.platform.exception.ResourceLoadException;
-import io.archura.platform.fc.configuration.IFFEConfiguration;
+import io.archura.platform.fc.configuration.IIFEConfiguration;
 import io.archura.platform.fc.function.StreamConsumer;
 import io.archura.platform.fc.function.StreamProducer;
 import io.archura.platform.function.Configurable;
@@ -133,20 +133,20 @@ public class ArchuraPlatformApplication {
 
     private void loadIFFEConfiguration() {
         final String iffeConfigURL = String.format("%s/functional-core/iife/config.json", configRepositoryUrl);
-        final IFFEConfiguration iffeConfig = getIFFEConfiguration(iffeConfigURL);
-        final IFFEConfiguration.Configuration config = iffeConfig.getConfig(); // set log level
-        final Map<String, IFFEConfiguration.EnvironmentConfiguration> environments = iffeConfig.getEnvironments();
-        for (Map.Entry<String, IFFEConfiguration.EnvironmentConfiguration> environmentEntry : environments.entrySet()) {
+        final IIFEConfiguration iffeConfig = getIFFEConfiguration(iffeConfigURL);
+        final IIFEConfiguration.Configuration config = iffeConfig.getConfig(); // set log level
+        final Map<String, IIFEConfiguration.EnvironmentConfiguration> environments = iffeConfig.getEnvironments();
+        for (Map.Entry<String, IIFEConfiguration.EnvironmentConfiguration> environmentEntry : environments.entrySet()) {
             final String environmentName = environmentEntry.getKey();
-            final IFFEConfiguration.EnvironmentConfiguration environmentConfiguration = environmentEntry.getValue();
-            final IFFEConfiguration.Configuration environmentConfig = environmentConfiguration.getConfig(); // set log level
-            final Map<String, IFFEConfiguration.TenantConfiguration> tenants = environmentConfiguration.getTenants();
-            for (Map.Entry<String, IFFEConfiguration.TenantConfiguration> tenantEntry : tenants.entrySet()) {
+            final IIFEConfiguration.EnvironmentConfiguration environmentConfiguration = environmentEntry.getValue();
+            final IIFEConfiguration.Configuration environmentConfig = environmentConfiguration.getConfig(); // set log level
+            final Map<String, IIFEConfiguration.TenantConfiguration> tenants = environmentConfiguration.getTenants();
+            for (Map.Entry<String, IIFEConfiguration.TenantConfiguration> tenantEntry : tenants.entrySet()) {
                 final String tenantId = tenantEntry.getKey();
-                final IFFEConfiguration.TenantConfiguration tenantConfiguration = tenantEntry.getValue();
-                final IFFEConfiguration.Configuration tenantConfig = tenantConfiguration.getConfig(); // set log level
-                final List<IFFEConfiguration.FunctionConfiguration> functions = tenantConfiguration.getFunctions();
-                for (IFFEConfiguration.FunctionConfiguration functionConfiguration : functions) {
+                final IIFEConfiguration.TenantConfiguration tenantConfiguration = tenantEntry.getValue();
+                final IIFEConfiguration.Configuration tenantConfig = tenantConfiguration.getConfig(); // set log level
+                final List<IIFEConfiguration.FunctionConfiguration> functions = tenantConfiguration.getFunctions();
+                for (IIFEConfiguration.FunctionConfiguration functionConfiguration : functions) {
                     final JsonNode functionConfig = functionConfiguration.getConfig(); // set log level
                     final String functionName = functionConfiguration.getName();
                     final String functionVersion = functionConfiguration.getVersion();
@@ -157,8 +157,8 @@ public class ArchuraPlatformApplication {
         }
     }
 
-    private IFFEConfiguration getIFFEConfiguration(String url) {
-        return getConfiguration(url, IFFEConfiguration.class);
+    private IIFEConfiguration getIFFEConfiguration(String url) {
+        return getConfiguration(url, IIFEConfiguration.class);
     }
 
     @Bean
