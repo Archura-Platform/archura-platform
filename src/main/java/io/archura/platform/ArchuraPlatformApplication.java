@@ -21,6 +21,7 @@ import io.archura.platform.api.type.Configurable;
 import io.archura.platform.api.type.functionalcore.ContextConsumer;
 import io.archura.platform.api.type.functionalcore.StreamConsumer;
 import io.archura.platform.api.type.functionalcore.StreamProducer;
+import io.archura.platform.internal.configuration.CacheConfiguration;
 import io.archura.platform.internal.cache.TenantCache;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.configuration.IIFEConfiguration;
@@ -29,7 +30,6 @@ import io.archura.platform.internal.logging.LoggerFactory;
 import io.archura.platform.internal.stream.Movie;
 import io.archura.platform.internal.stream.RedisStreamSubscription;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
@@ -39,7 +39,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.embedded.tomcat.TomcatProtocolHandlerCustomizer;
 import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
 import org.springframework.context.annotation.Bean;
-import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.connection.stream.ObjectRecord;
 import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.connection.stream.StreamInfo;
@@ -100,6 +100,9 @@ public class ArchuraPlatformApplication {
     private final Map<String, HttpClient> tenantHttpClientMap = new HashMap<>();
 
     private final HttpClient configurationHttpClient = buildDefaultHttpClient();
+    private HashOperations<String, String, Map<String, Object>> hashOperations;
+    private StreamOperations<String, Object, Object> streamOperations;
+    private LettuceConnectionFactory redisConnectionFactory;
 
     public static void main(String[] args) {
         SpringApplication.run(ArchuraPlatformApplication.class, args);
@@ -127,11 +130,12 @@ public class ArchuraPlatformApplication {
     }
 
     @Bean
-    public ApplicationRunner prepareGlobalConfiguration(
-            @Autowired(required = false) final HashOperations<String, String, Map<String, Object>> hashOperations
-    ) {
+    public ApplicationRunner prepareGlobalConfiguration() {
         return args -> {
             loadGlobalConfiguration();
+            this.hashOperations = globalConfiguration.getCacheConfiguration().createHashOperations();
+            this.streamOperations = globalConfiguration.getCacheConfiguration().createStreamOperations();
+            this.redisConnectionFactory = globalConfiguration.getCacheConfiguration().getRedisConnectionFactory();
             loadIFFEConfiguration(hashOperations);
         };
     }
@@ -142,6 +146,15 @@ public class ArchuraPlatformApplication {
         this.globalConfiguration.setPre(globalConfig.getPre());
         this.globalConfiguration.setPost(globalConfig.getPost());
         this.globalConfiguration.setConfig(globalConfig.getConfig());
+        final String redisUrl = this.globalConfiguration.getConfig().getRedisUrl();
+        final CacheConfiguration cacheConfiguration = createCacheConfiguration(redisUrl);
+        this.globalConfiguration.setCacheConfiguration(cacheConfiguration);
+    }
+
+    private CacheConfiguration createCacheConfiguration(final String redisUrl) {
+        final CacheConfiguration cacheConfiguration = new CacheConfiguration(redisUrl);
+        cacheConfiguration.createRedisConnectionFactory();
+        return cacheConfiguration;
     }
 
     private void loadIFFEConfiguration(final HashOperations<String, String, Map<String, Object>> hashOperations) {
@@ -187,9 +200,6 @@ public class ArchuraPlatformApplication {
 
     @Bean
     public RouterFunction<ServerResponse> routes(
-            @Autowired(required = false) final HashOperations<String, String, Map<String, Object>> hashOperations,
-            @Autowired(required = false) final StreamOperations<String, Object, Object> streamOperations,
-            @Autowired(required = false) final RedisConnectionFactory redisConnectionFactory,
             final ConfigurableBeanFactory beanFactory,
             final @Qualifier("VirtualExecutorService") ExecutorService executorService
     ) {

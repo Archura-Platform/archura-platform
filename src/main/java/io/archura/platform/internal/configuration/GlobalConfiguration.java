@@ -15,9 +15,11 @@ public class GlobalConfiguration {
     private List<PostFilterConfiguration> post = new ArrayList<>();
     private Map<String, EnvironmentConfiguration> environments = new HashMap<>();
     private GlobalConfig config = new GlobalConfig();
+    private CacheConfiguration cacheConfiguration;
 
     @Data
     public static class GlobalConfig extends Configuration {
+        private String redisUrl;
         private String codeRepositoryUrl;
         private String archuraPlatformToken;
     }
