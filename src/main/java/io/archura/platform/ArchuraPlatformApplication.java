@@ -8,9 +8,7 @@ import io.archura.platform.api.attribute.EnvironmentKeys;
 import io.archura.platform.api.attribute.GlobalKeys;
 import io.archura.platform.api.attribute.TenantKeys;
 import io.archura.platform.api.cache.Cache;
-import io.archura.platform.internal.cache.TenantCache;
 import io.archura.platform.api.context.Context;
-import io.archura.platform.internal.context.RequestContext;
 import io.archura.platform.api.exception.ConfigurationException;
 import io.archura.platform.api.exception.ErrorDetail;
 import io.archura.platform.api.exception.FunctionIsNotAContextConsumerException;
@@ -18,17 +16,20 @@ import io.archura.platform.api.exception.FunctionIsNotAHandlerFunctionException;
 import io.archura.platform.api.exception.PostFilterIsNotABiFunctionException;
 import io.archura.platform.api.exception.PreFilterIsNotAUnaryOperatorException;
 import io.archura.platform.api.exception.ResourceLoadException;
-import io.archura.platform.internal.configuration.IIFEConfiguration;
+import io.archura.platform.api.logger.Logger;
+import io.archura.platform.api.type.Configurable;
 import io.archura.platform.api.type.functionalcore.ContextConsumer;
 import io.archura.platform.api.type.functionalcore.StreamConsumer;
 import io.archura.platform.api.type.functionalcore.StreamProducer;
-import io.archura.platform.api.type.Configurable;
+import io.archura.platform.internal.cache.TenantCache;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
-import io.archura.platform.api.logger.Logger;
+import io.archura.platform.internal.configuration.IIFEConfiguration;
+import io.archura.platform.internal.context.RequestContext;
 import io.archura.platform.internal.logging.LoggerFactory;
 import io.archura.platform.internal.stream.Movie;
 import io.archura.platform.internal.stream.RedisStreamSubscription;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
@@ -88,9 +89,6 @@ public class ArchuraPlatformApplication {
     @Value("${config.repository.url:http://config-service/}")
     private String configRepositoryUrl;
 
-    @Value("${code.repository.url:http://code-service/}")
-    private String codeRepositoryUrl;
-
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final RedisStreamSubscription redisStreamSubscription = new RedisStreamSubscription();
@@ -129,10 +127,21 @@ public class ArchuraPlatformApplication {
     }
 
     @Bean
-    public ApplicationRunner prepareIFFEConfiguration(
-            final HashOperations<String, String, Map<String, Object>> hashOperations
+    public ApplicationRunner prepareGlobalConfiguration(
+            @Autowired(required = false) final HashOperations<String, String, Map<String, Object>> hashOperations
     ) {
-        return args -> loadIFFEConfiguration(hashOperations);
+        return args -> {
+            loadGlobalConfiguration();
+            loadIFFEConfiguration(hashOperations);
+        };
+    }
+
+    private void loadGlobalConfiguration() {
+        final String globalConfigURL = String.format("%s/imperative-shell/global/config.json", configRepositoryUrl);
+        final GlobalConfiguration globalConfig = getGlobalConfiguration(globalConfigURL);
+        this.globalConfiguration.setPre(globalConfig.getPre());
+        this.globalConfiguration.setPost(globalConfig.getPost());
+        this.globalConfiguration.setConfig(globalConfig.getConfig());
     }
 
     private void loadIFFEConfiguration(final HashOperations<String, String, Map<String, Object>> hashOperations) {
@@ -156,7 +165,7 @@ public class ArchuraPlatformApplication {
                 for (IIFEConfiguration.FunctionConfiguration functionConfiguration : functions) {
                     // create function
                     final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
-                    final ContextConsumer iifeFunction = getIIFEFunction(codeRepositoryUrl, functionConfiguration, query);
+                    final ContextConsumer iifeFunction = getIIFEFunction(globalConfiguration.getConfig().getCodeRepositoryUrl(), functionConfiguration, query);
                     // invoke function
                     getExecutorService().submit(() -> iifeFunction.accept(context));
                 }
@@ -177,23 +186,10 @@ public class ArchuraPlatformApplication {
     }
 
     @Bean
-    public ApplicationRunner prepareGlobalConfiguration() {
-        return args -> loadGlobalConfiguration();
-    }
-
-    private void loadGlobalConfiguration() {
-        final String globalConfigURL = String.format("%s/imperative-shell/global/config.json", configRepositoryUrl);
-        final GlobalConfiguration globalConfig = getGlobalConfiguration(globalConfigURL);
-        this.globalConfiguration.setPre(globalConfig.getPre());
-        this.globalConfiguration.setPost(globalConfig.getPost());
-        this.globalConfiguration.setConfig(globalConfig.getConfig());
-    }
-
-    @Bean
     public RouterFunction<ServerResponse> routes(
-            final HashOperations<String, String, Map<String, Object>> hashOperations,
-            final StreamOperations<String, Object, Object> streamOperations,
-            final RedisConnectionFactory redisConnectionFactory,
+            @Autowired(required = false) final HashOperations<String, String, Map<String, Object>> hashOperations,
+            @Autowired(required = false) final StreamOperations<String, Object, Object> streamOperations,
+            @Autowired(required = false) final RedisConnectionFactory redisConnectionFactory,
             final ConfigurableBeanFactory beanFactory,
             final @Qualifier("VirtualExecutorService") ExecutorService executorService
     ) {
@@ -438,7 +434,7 @@ public class ArchuraPlatformApplication {
         return globalConfiguration
                 .getPre()
                 .stream()
-                .map(preFilterConfig -> getPreFilter(codeRepositoryUrl, preFilterConfig, "global"))
+                .map(preFilterConfig -> getPreFilter(globalConfiguration.getConfig().getCodeRepositoryUrl(), preFilterConfig, "global"))
                 .toList();
     }
 
@@ -456,7 +452,7 @@ public class ArchuraPlatformApplication {
         return globalConfiguration.getEnvironments().get(environmentName)
                 .getPre()
                 .stream()
-                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter, String.format("environmentName=%s", environmentName)))
+                .map(preFilter -> getPreFilter(globalConfiguration.getConfig().getCodeRepositoryUrl(), preFilter, String.format("environmentName=%s", environmentName)))
                 .toList();
     }
 
@@ -478,7 +474,7 @@ public class ArchuraPlatformApplication {
         return environmentConfiguration.getTenants().get(tenantId)
                 .getPre()
                 .stream()
-                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
+                .map(preFilter -> getPreFilter(globalConfiguration.getConfig().getCodeRepositoryUrl(), preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
                 .toList();
     }
 
@@ -498,7 +494,7 @@ public class ArchuraPlatformApplication {
         return routeConfiguration
                 .getPre()
                 .stream()
-                .map(preFilter -> getPreFilter(codeRepositoryUrl, preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
+                .map(preFilter -> getPreFilter(globalConfiguration.getConfig().getCodeRepositoryUrl(), preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
                 .toList();
     }
 
@@ -535,14 +531,14 @@ public class ArchuraPlatformApplication {
         if (nonNull(routeConfiguration)) {
             GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration functionConfiguration = routeConfiguration.getFunction();
             if (nonNull(functionConfiguration)) {
-                return Optional.of(getFunction(codeRepositoryUrl, functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
+                return Optional.of(getFunction(globalConfiguration.getConfig().getCodeRepositoryUrl(), functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
             }
         }
         GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfigurationCatchAll = tenantConfiguration.getRoutes().get(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
         if (nonNull(routeConfigurationCatchAll)) {
             GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration functionConfiguration = routeConfigurationCatchAll.getFunction();
             if (nonNull(functionConfiguration)) {
-                return Optional.of(getFunction(codeRepositoryUrl, functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
+                return Optional.of(getFunction(globalConfiguration.getConfig().getCodeRepositoryUrl(), functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
             }
         }
         return Optional.empty();
@@ -614,7 +610,7 @@ public class ArchuraPlatformApplication {
         return tenantConfiguration
                 .getPost()
                 .stream()
-                .map(preFilter -> getPostFilter(codeRepositoryUrl, preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
+                .map(preFilter -> getPostFilter(globalConfiguration.getConfig().getCodeRepositoryUrl(), preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
                 .toList();
     }
 
@@ -630,7 +626,7 @@ public class ArchuraPlatformApplication {
         return tenantConfiguration
                 .getPost()
                 .stream()
-                .map(preFilter -> getPostFilter(codeRepositoryUrl, preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
+                .map(preFilter -> getPostFilter(globalConfiguration.getConfig().getCodeRepositoryUrl(), preFilter, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)))
                 .toList();
     }
 
@@ -642,7 +638,7 @@ public class ArchuraPlatformApplication {
         return environmentConfiguration
                 .getPost()
                 .stream()
-                .map(postFilter -> getPostFilter(codeRepositoryUrl, postFilter, String.format("environmentName=%s", environmentName)))
+                .map(postFilter -> getPostFilter(globalConfiguration.getConfig().getCodeRepositoryUrl(), postFilter, String.format("environmentName=%s", environmentName)))
                 .toList();
     }
 
@@ -650,7 +646,7 @@ public class ArchuraPlatformApplication {
         return globalConfiguration
                 .getPost()
                 .stream()
-                .map(postFilterConfig -> getPostFilter(codeRepositoryUrl, postFilterConfig, "global"))
+                .map(postFilterConfig -> getPostFilter(globalConfiguration.getConfig().getCodeRepositoryUrl(), postFilterConfig, "global"))
                 .toList();
     }
 

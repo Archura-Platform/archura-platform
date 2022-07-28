@@ -2,7 +2,9 @@ package io.archura.platform.internal.cache;
 
 import com.fasterxml.jackson.databind.type.MapType;
 import com.fasterxml.jackson.databind.type.TypeFactory;
+import io.lettuce.core.RedisURI;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -21,32 +23,20 @@ import java.util.Map;
 import static java.util.Objects.nonNull;
 
 @Configuration
+@ConditionalOnProperty(name = "spring.redis.url")
 public class CacheConfiguration {
 
-    @Value("${redis.host:localhost}")
-    private String redisHost;
-
-    @Value("${redis.port:6379}")
-    private int redisPort;
-
-    @Value("${redis.database:0}")
-    private int redisDatabase;
-
-    @Value("${redis.user:#{null}}")
-    private String redisUser;
-
-    @Value("${redis.password:#{null}}")
-    private String redisPassword;
+    @Value("${spring.redis.url}")
+    private String redisUrl;
 
     @Bean
     public RedisConnectionFactory redisConnectionFactory() {
-        final RedisStandaloneConfiguration redisConfiguration = new RedisStandaloneConfiguration(redisHost, redisPort);
-        redisConfiguration.setDatabase(redisDatabase);
-        if (nonNull(redisUser)) {
-            redisConfiguration.setUsername(redisUser);
-        }
-        if (nonNull(redisPassword)) {
-            redisConfiguration.setPassword(RedisPassword.of(redisPassword));
+        final RedisURI redisURI = RedisURI.create(redisUrl);
+        final RedisStandaloneConfiguration redisConfiguration = new RedisStandaloneConfiguration(redisURI.getHost(), redisURI.getPort());
+        redisConfiguration.setDatabase(redisURI.getDatabase());
+        redisConfiguration.setUsername(redisURI.getUsername());
+        if (nonNull(redisURI.getPassword())) {
+            redisConfiguration.setPassword(RedisPassword.of(redisURI.getPassword()));
         }
         return new LettuceConnectionFactory(redisConfiguration);
     }

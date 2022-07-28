@@ -14,7 +14,13 @@ public class GlobalConfiguration {
     private List<PreFilterConfiguration> pre = new ArrayList<>();
     private List<PostFilterConfiguration> post = new ArrayList<>();
     private Map<String, EnvironmentConfiguration> environments = new HashMap<>();
-    private Configuration config = new Configuration();
+    private GlobalConfig config = new GlobalConfig();
+
+    @Data
+    public static class GlobalConfig extends Configuration {
+        private String codeRepositoryUrl;
+        private String archuraPlatformToken;
+    }
 
     @Data
     public static class PreFilterConfiguration {
