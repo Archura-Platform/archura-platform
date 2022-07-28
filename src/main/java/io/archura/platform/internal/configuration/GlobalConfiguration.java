@@ -16,6 +16,9 @@ public class GlobalConfiguration {
     private Map<String, EnvironmentConfiguration> environments = new HashMap<>();
     private GlobalConfig config = new GlobalConfig();
     private CacheConfiguration cacheConfiguration;
+    private IIFEConfiguration iifeConfiguration;
+    private StreamConfiguration streamConfiguration;
+    private ScheduledConfiguration scheduledConfiguration;
 
     @Data
     public static class GlobalConfig extends Configuration {

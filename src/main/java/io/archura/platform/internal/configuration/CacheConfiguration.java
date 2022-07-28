@@ -21,6 +21,8 @@ public class CacheConfiguration {
 
     private final String redisUrl;
     private LettuceConnectionFactory redisConnectionFactory;
+    private HashOperations<String, String, Map<String, Object>> hashOperations;
+    private StreamOperations<String, Object, Object> streamOperations;
 
     public CacheConfiguration(final String redisUrl) {
         this.redisUrl = redisUrl;
@@ -28,6 +30,14 @@ public class CacheConfiguration {
 
     public LettuceConnectionFactory getRedisConnectionFactory() {
         return redisConnectionFactory;
+    }
+
+    public HashOperations<String, String, Map<String, Object>> getHashOperations() {
+        return hashOperations;
+    }
+
+    public StreamOperations<String, Object, Object> getStreamOperations() {
+        return streamOperations;
     }
 
     public void createRedisConnectionFactory() {
@@ -42,12 +52,17 @@ public class CacheConfiguration {
         this.redisConnectionFactory.afterPropertiesSet();
     }
 
-    public HashOperations<String, String, Map<String, Object>> createHashOperations() {
-        return redisTemplate().opsForHash();
+    public void createHashOperations() {
+        this.hashOperations = getRedisTemplate().opsForHash();
     }
 
-    private RedisTemplate<String, Map<String, Object>> redisTemplate() {
+    public void createStreamOperations() {
+        final StringRedisTemplate stringRedisTemplate = getStringRedisTemplate();
+        stringRedisTemplate.afterPropertiesSet();
+        this.streamOperations = stringRedisTemplate.opsForStream();
+    }
 
+    private RedisTemplate<String, Map<String, Object>> getRedisTemplate() {
         final MapType mapType = TypeFactory.defaultInstance().constructMapType(Map.class, String.class, Object.class);
         final RedisTemplate<String, Map<String, Object>> redisTemplate = new RedisTemplate<>();
         redisTemplate.setConnectionFactory(redisConnectionFactory);
@@ -59,11 +74,6 @@ public class CacheConfiguration {
         redisTemplate.afterPropertiesSet();
 
         return redisTemplate;
-    }
-
-    public StreamOperations<String, Object, Object> createStreamOperations() {
-        final StringRedisTemplate stringRedisTemplate = getStringRedisTemplate();
-        return stringRedisTemplate.opsForStream();
     }
 
     private StringRedisTemplate getStringRedisTemplate() {
