@@ -1,4 +1,6 @@
-package io.archura.platform.logging;
+package io.archura.platform.internal.logging;
+
+import io.archura.platform.api.logger.Logger;
 
 import java.util.Map;
 

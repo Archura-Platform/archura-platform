@@ -17,6 +17,7 @@
         <java.version>19</java.version>
         <compiler.source>19</compiler.source>
         <compiler.target>19</compiler.target>
+        <archura-platform-api.version>0.0.1</archura-platform-api.version>
     </properties>
     <dependencies>
         <dependency>
@@ -26,6 +27,11 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.archura</groupId>
+            <artifactId>archura-platform-api</artifactId>
+            <version>${archura-platform-api.version}</version>
         </dependency>
 
         <dependency>

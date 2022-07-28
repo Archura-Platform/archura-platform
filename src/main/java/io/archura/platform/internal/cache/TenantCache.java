@@ -1,5 +1,6 @@
-package io.archura.platform.cache;
+package io.archura.platform.internal.cache;
 
+import io.archura.platform.api.cache.Cache;
 import jdk.internal.reflect.Reflection;
 import org.springframework.data.redis.core.HashOperations;
 

@@ -1,4 +1,4 @@
-package io.archura.platform.logging;
+package io.archura.platform.internal.logging;
 
 
 import java.io.PrintStream;

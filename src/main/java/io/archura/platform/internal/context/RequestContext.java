@@ -1,8 +1,9 @@
-package io.archura.platform.context;
+package io.archura.platform.internal.context;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.archura.platform.cache.Cache;
-import io.archura.platform.logging.Logger;
+import io.archura.platform.api.cache.Cache;
+import io.archura.platform.api.context.Context;
+import io.archura.platform.api.logger.Logger;
 import lombok.Builder;
 import lombok.Data;
 

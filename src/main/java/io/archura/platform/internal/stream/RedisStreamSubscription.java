@@ -1,4 +1,4 @@
-package io.archura.platform.stream;
+package io.archura.platform.internal.stream;
 
 
 import org.springframework.data.redis.connection.RedisConnectionFactory;

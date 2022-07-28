@@ -1,7 +1,7 @@
-package io.archura.platform.fc.configuration;
+package io.archura.platform.internal.configuration;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import io.archura.platform.attribute.GlobalKeys;
+import io.archura.platform.api.attribute.GlobalKeys;
 import lombok.Data;
 
 import java.util.ArrayList;
@@ -30,6 +30,7 @@ public class IIFEConfiguration {
     public static class FunctionConfiguration {
         private String name;
         private String version;
+        private String logLevel;
         private JsonNode config;
     }
 

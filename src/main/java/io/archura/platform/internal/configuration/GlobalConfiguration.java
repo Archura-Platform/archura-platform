@@ -1,7 +1,7 @@
-package io.archura.platform.ish.configuration;
+package io.archura.platform.internal.configuration;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import io.archura.platform.attribute.GlobalKeys;
+import io.archura.platform.api.attribute.GlobalKeys;
 import lombok.Data;
 
 import java.util.ArrayList;

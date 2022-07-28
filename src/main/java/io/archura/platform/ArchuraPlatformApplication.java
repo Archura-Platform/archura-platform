@@ -4,28 +4,30 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.archura.platform.attribute.EnvironmentKeys;
-import io.archura.platform.attribute.GlobalKeys;
-import io.archura.platform.attribute.TenantKeys;
-import io.archura.platform.cache.Cache;
-import io.archura.platform.cache.TenantCache;
-import io.archura.platform.context.Context;
-import io.archura.platform.context.RequestContext;
-import io.archura.platform.exception.ConfigurationException;
-import io.archura.platform.exception.ErrorDetail;
-import io.archura.platform.exception.FunctionIsNotAHandlerFunctionException;
-import io.archura.platform.exception.PostFilterIsNotABiFunctionException;
-import io.archura.platform.exception.PreFilterIsNotAUnaryOperatorException;
-import io.archura.platform.exception.ResourceLoadException;
-import io.archura.platform.fc.configuration.IIFEConfiguration;
-import io.archura.platform.fc.function.StreamConsumer;
-import io.archura.platform.fc.function.StreamProducer;
-import io.archura.platform.function.Configurable;
-import io.archura.platform.ish.configuration.GlobalConfiguration;
-import io.archura.platform.logging.Logger;
-import io.archura.platform.logging.LoggerFactory;
-import io.archura.platform.stream.Movie;
-import io.archura.platform.stream.RedisStreamSubscription;
+import io.archura.platform.api.attribute.EnvironmentKeys;
+import io.archura.platform.api.attribute.GlobalKeys;
+import io.archura.platform.api.attribute.TenantKeys;
+import io.archura.platform.api.cache.Cache;
+import io.archura.platform.internal.cache.TenantCache;
+import io.archura.platform.api.context.Context;
+import io.archura.platform.internal.context.RequestContext;
+import io.archura.platform.api.exception.ConfigurationException;
+import io.archura.platform.api.exception.ErrorDetail;
+import io.archura.platform.api.exception.FunctionIsNotAContextConsumerException;
+import io.archura.platform.api.exception.FunctionIsNotAHandlerFunctionException;
+import io.archura.platform.api.exception.PostFilterIsNotABiFunctionException;
+import io.archura.platform.api.exception.PreFilterIsNotAUnaryOperatorException;
+import io.archura.platform.api.exception.ResourceLoadException;
+import io.archura.platform.internal.configuration.IIFEConfiguration;
+import io.archura.platform.api.type.functionalcore.ContextConsumer;
+import io.archura.platform.api.type.functionalcore.StreamConsumer;
+import io.archura.platform.api.type.functionalcore.StreamProducer;
+import io.archura.platform.api.type.Configurable;
+import io.archura.platform.internal.configuration.GlobalConfiguration;
+import io.archura.platform.api.logger.Logger;
+import io.archura.platform.internal.logging.LoggerFactory;
+import io.archura.platform.internal.stream.Movie;
+import io.archura.platform.internal.stream.RedisStreamSubscription;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -127,11 +129,13 @@ public class ArchuraPlatformApplication {
     }
 
     @Bean
-    public ApplicationRunner prepareIFFEConfiguration() {
-        return args -> loadIFFEConfiguration();
+    public ApplicationRunner prepareIFFEConfiguration(
+            final HashOperations<String, String, Map<String, Object>> hashOperations
+    ) {
+        return args -> loadIFFEConfiguration(hashOperations);
     }
 
-    private void loadIFFEConfiguration() {
+    private void loadIFFEConfiguration(final HashOperations<String, String, Map<String, Object>> hashOperations) {
         final String iffeConfigURL = String.format("%s/functional-core/iife/config.json", configRepositoryUrl);
         final IIFEConfiguration iffeConfig = getIFFEConfiguration(iffeConfigURL);
         final IIFEConfiguration.Configuration config = iffeConfig.getConfig(); // set log level
@@ -143,18 +147,29 @@ public class ArchuraPlatformApplication {
             final Map<String, IIFEConfiguration.TenantConfiguration> tenants = environmentConfiguration.getTenants();
             for (Map.Entry<String, IIFEConfiguration.TenantConfiguration> tenantEntry : tenants.entrySet()) {
                 final String tenantId = tenantEntry.getKey();
+                // create context
+                final Context context = createContextForEnvironmentAndTenant(hashOperations, environmentName, tenantId);
+                // read IFFE configuration
                 final IIFEConfiguration.TenantConfiguration tenantConfiguration = tenantEntry.getValue();
                 final IIFEConfiguration.Configuration tenantConfig = tenantConfiguration.getConfig(); // set log level
                 final List<IIFEConfiguration.FunctionConfiguration> functions = tenantConfiguration.getFunctions();
                 for (IIFEConfiguration.FunctionConfiguration functionConfiguration : functions) {
-                    final JsonNode functionConfig = functionConfiguration.getConfig(); // set log level
-                    final String functionName = functionConfiguration.getName();
-                    final String functionVersion = functionConfiguration.getVersion();
                     // create function
+                    final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
+                    final ContextConsumer iifeFunction = getIIFEFunction(codeRepositoryUrl, functionConfiguration, query);
                     // invoke function
+                    getExecutorService().submit(() -> iifeFunction.accept(context));
                 }
             }
         }
+    }
+
+    private Context createContextForEnvironmentAndTenant(HashOperations<String, String, Map<String, Object>> hashOperations, String environmentName, String tenantId) {
+        final HashMap<String, Object> attributes = new HashMap<>();
+        attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), environmentName);
+        attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), tenantId);
+        rebuildContext(attributes, hashOperations);
+        return (Context) attributes.get(Context.class.getSimpleName());
     }
 
     private IIFEConfiguration getIFFEConfiguration(String url) {
@@ -531,6 +546,22 @@ public class ArchuraPlatformApplication {
             }
         }
         return Optional.empty();
+    }
+
+    private ContextConsumer getIIFEFunction(String codeServerURL, IIFEConfiguration.FunctionConfiguration configuration, String query) {
+        final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
+        final String resourceKey = String.format("%s?%s", resourceUrl, query);
+        try {
+            final Object object = createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
+            if (ContextConsumer.class.isAssignableFrom(object.getClass())) {
+                @SuppressWarnings("unchecked") final ContextConsumer handlerFunction = (ContextConsumer) object;
+                return handlerFunction;
+            } else {
+                throw new FunctionIsNotAContextConsumerException(String.format("Resource is not a ContextConsumer, url: %s", resourceUrl));
+            }
+        } catch (Exception e) {
+            throw new ResourceLoadException(e);
+        }
     }
 
     private HandlerFunction<ServerResponse> getFunction(String codeServerURL, GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration configuration, String query) {
