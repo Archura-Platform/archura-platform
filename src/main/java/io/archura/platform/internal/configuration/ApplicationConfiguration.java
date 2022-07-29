@@ -12,6 +12,7 @@ import org.springframework.boot.web.embedded.tomcat.TomcatProtocolHandlerCustomi
 import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.servlet.function.RequestPredicates;
 import org.springframework.web.servlet.function.RouterFunction;
 import org.springframework.web.servlet.function.RouterFunctions;
@@ -25,6 +26,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 
 @Configuration
+@EnableScheduling
 public class ApplicationConfiguration {
 
     @Value("${config.repository.url:http://config-service/}")
@@ -32,6 +34,8 @@ public class ApplicationConfiguration {
     private final HttpClient defaultHttpClient = buildDefaultHttpClient();
     private final HttpClient configurationHttpClient = buildConfigurationHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ThreadFactory threadFactory = getThreadFactory();
+
 
     @Bean
     public ApplicationRunner prepareConfigurations(final Initializer initializer) {
@@ -40,8 +44,11 @@ public class ApplicationConfiguration {
 
     @Bean("VirtualExecutorService")
     public ExecutorService getExecutorService() {
-        final ThreadFactory factory = Thread.ofVirtual().name("VIRTUAL-THREAD").factory();
-        return Executors.newCachedThreadPool(factory);
+        return Executors.newCachedThreadPool(threadFactory);
+    }
+
+    private ThreadFactory getThreadFactory() {
+        return Thread.ofVirtual().name("VIRTUAL-THREAD").factory();
     }
 
     @Bean
@@ -74,7 +81,7 @@ public class ApplicationConfiguration {
             @Qualifier("VirtualExecutorService") final ExecutorService executorService,
             final Assets assets
     ) {
-        return new Initializer(configRepositoryUrl, configurationHttpClient, beanFactory, executorService, assets);
+        return new Initializer(configRepositoryUrl, configurationHttpClient, beanFactory, threadFactory, executorService, assets);
     }
 
     @Bean
@@ -100,4 +107,5 @@ public class ApplicationConfiguration {
     private HttpClient buildConfigurationHttpClient() {
         return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
+
 }

@@ -32,10 +32,6 @@ public class ScheduledConfiguration {
         private String version;
         private String cron;
         private String zone;
-        private String fixedDelay;
-        private String fixedRate;
-        private String initialDelay;
-        private String timeUnit;
         private String logLevel;
         private JsonNode config;
     }
