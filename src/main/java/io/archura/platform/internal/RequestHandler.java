@@ -1,46 +1,26 @@
 package io.archura.platform.internal;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.archura.platform.api.attribute.EnvironmentKeys;
 import io.archura.platform.api.attribute.GlobalKeys;
 import io.archura.platform.api.attribute.TenantKeys;
-import io.archura.platform.api.context.Context;
 import io.archura.platform.api.exception.ErrorDetail;
 import io.archura.platform.api.exception.FunctionIsNotAHandlerFunctionException;
 import io.archura.platform.api.exception.PostFilterIsNotABiFunctionException;
 import io.archura.platform.api.exception.PreFilterIsNotAUnaryOperatorException;
 import io.archura.platform.api.exception.ResourceLoadException;
-import io.archura.platform.api.logger.Logger;
-import io.archura.platform.api.type.functionalcore.StreamConsumer;
-import io.archura.platform.api.type.functionalcore.StreamProducer;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
-import io.archura.platform.internal.stream.Movie;
-import io.archura.platform.internal.stream.RedisStreamSubscription;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.connection.stream.ObjectRecord;
-import org.springframework.data.redis.connection.stream.RecordId;
-import org.springframework.data.redis.connection.stream.StreamInfo;
-import org.springframework.data.redis.connection.stream.StreamRecords;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StreamOperations;
-import org.springframework.data.redis.stream.StreamListener;
-import org.springframework.data.redis.stream.Subscription;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.servlet.function.HandlerFunction;
 import org.springframework.web.servlet.function.ServerRequest;
 import org.springframework.web.servlet.function.ServerResponse;
 
-import java.io.IOException;
 import java.net.http.HttpClient;
-import java.nio.charset.StandardCharsets;
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -61,121 +41,16 @@ public class RequestHandler {
     private final ConfigurableBeanFactory beanFactory;
     private final ExecutorService executorService;
 
-    public ServerResponse handleProducer(ServerRequest request) {
-        final GlobalConfiguration globalConfiguration = beanFactory.getBean(GlobalConfiguration.class);
-        final String environment = "default";
-        final String tenantId = "default";
-        final String topicNameFromConfiguration = "key1";
-        final String streamKey = String.format("%s-%s-%s", environment, tenantId, topicNameFromConfiguration);
-        // CREATE CONTEXT
-        final HashMap<String, Object> attributes = new HashMap<>();
-        attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), environment);
-        attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), tenantId);
-        final HashOperations<String, String, Map<String, Object>> hashOperations = globalConfiguration.getCacheConfiguration().getHashOperations();
-        assets.rebuildContext(attributes, hashOperations);
-        final Context context = (Context) attributes.get(Context.class.getSimpleName());
-        final Logger logger = context.getLogger();
-        final StreamProducer movieProducer = c -> {
-            final ObjectMapper objectMapper = c.getObjectMapper();
-            final Movie movie = new Movie("Movie Title", 1977);
-            String movieString = "";
-            try {
-                movieString = objectMapper.writeValueAsString(movie);
-            } catch (JsonProcessingException e) {
-                e.printStackTrace();
-            }
-            final String key = String.valueOf(System.currentTimeMillis());
-            return new AbstractMap.SimpleEntry<>(
-                    key.getBytes(StandardCharsets.UTF_8),
-                    movieString.getBytes(StandardCharsets.UTF_8));
-        };
-        Map.Entry<byte[], byte[]> entry = movieProducer.produce(context);
-
-        ObjectRecord<String, byte[]> streamRecord = StreamRecords.newRecord()
-                .ofObject(entry.getValue())
-                .withStreamKey(streamKey);
-        final StreamOperations<String, Object, Object> streamOperations = globalConfiguration.getCacheConfiguration().getStreamOperations();
-        final RecordId add = streamOperations.add(streamRecord);
-        logger.info("streamOperations add = " + add);
-        return ServerResponse.ok().build();
-    }
-
-    public ServerResponse handleConsumer(ServerRequest serverRequest) {
-        final GlobalConfiguration globalConfiguration = beanFactory.getBean(GlobalConfiguration.class);
-        // CREATE FUNCTION FROM CONFIGURATION
-        final StreamConsumer movieConsumer = (context, key, value) -> {
-            try {
-                final Logger logger = context.getLogger();
-                final ObjectMapper objectMapper = context.getObjectMapper();
-                final Movie movie = objectMapper.readValue(value, Movie.class);
-                logger.info("key: %s, value: %s", new String(key), movie);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        };
-        // TRY AND REGISTER SINGLETON BEAN FOR FUNCTION
-        final String environment = "default";
-        final String tenantId = "default";
-        final String topicNameFromConfiguration = "key1";
-        final String topicName = String.format("%s-%s-%s", environment, tenantId, topicNameFromConfiguration);
-        final String topicConsumerBeanName = String.format("%s-%s", topicName, movieConsumer.hashCode());
-        // CREATE CONTEXT
-        final HashMap<String, Object> attributes = new HashMap<>();
-        attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), environment);
-        attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), tenantId);
-        final HashOperations<String, String, Map<String, Object>> hashOperations = globalConfiguration.getCacheConfiguration().getHashOperations();
-        assets.rebuildContext(attributes, hashOperations);
-        final Context context = (Context) attributes.get(Context.class.getSimpleName());
-        final Logger logger = context.getLogger();
-        // CREATE BEAN
-        try {
-            beanFactory.isSingleton(topicConsumerBeanName);
-        } catch (NoSuchBeanDefinitionException e) {
-            //
-            // IF STREAM TYPE IS REDIS
-            //
-            // CREATE STREAM AND GROUP FOR ENV-TENANT-TOPIC
-            final StreamOperations<String, Object, Object> streamOperations = globalConfiguration.getCacheConfiguration().getStreamOperations();
-            final StreamInfo.XInfoGroups groups = streamOperations.groups(topicName);
-            if (groups.isEmpty()) {
-                final String group = streamOperations.createGroup(topicName, topicName);
-                logger.info("group = " + group);
-            }
-            // CREATE REDIS BEAN
-            final StreamListener<String, ObjectRecord<String, byte[]>> redisStreamListener =
-                    message -> movieConsumer.consume(context, message.getId().getValue().getBytes(StandardCharsets.UTF_8), message.getValue());
-            final LettuceConnectionFactory redisConnectionFactory = globalConfiguration.getCacheConfiguration().getRedisConnectionFactory();
-            final RedisStreamSubscription redisStreamSubscription = new RedisStreamSubscription();
-            final Subscription redisStreamFunctionSubscription = redisStreamSubscription.createConsumerSubscription(
-                    redisConnectionFactory,
-                    redisStreamListener,
-                    topicName,
-                    executorService
-            );
-            // REGISTER REDIS BEAN
-            beanFactory.registerSingleton(topicConsumerBeanName, redisStreamFunctionSubscription);
-            //
-            //
-            //
-            //
-            //
-            // IF STREAM TYPE IS KAFKA
-            //
-        }
-        final Object topicConsumerBean = beanFactory.getBean(topicConsumerBeanName);
-        logger.info("topicConsumerBeanName = " + topicConsumerBeanName + " topicConsumerBean = " + topicConsumerBean);
-        return ServerResponse.ok().build();
-    }
-
     public ServerResponse handle(ServerRequest request) {
         try {
             final GlobalConfiguration globalConfiguration = beanFactory.getBean(GlobalConfiguration.class);
             final String logLevel = globalConfiguration.getConfig().getLogLevel();
             final HashOperations<String, String, Map<String, Object>> hashOperations = globalConfiguration.getCacheConfiguration().getHashOperations();
+            final StreamOperations<String, Object, Object> streamOperations = globalConfiguration.getCacheConfiguration().getStreamOperations();
 
             final Map<String, Object> attributes = request.attributes();
             attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), logLevel);
-            assets.rebuildContext(attributes, hashOperations);
+            assets.buildContext(attributes, hashOperations, streamOperations);
 
             final List<UnaryOperator<ServerRequest>> globalPreFilters = getGlobalPreFilters(
                     globalConfiguration.getPre(),
@@ -184,7 +59,7 @@ public class RequestHandler {
             for (UnaryOperator<ServerRequest> preFilter : globalPreFilters) {
                 assets.getLogger(attributes).debug("Will run global PreFilter: %s", preFilter.getClass().getSimpleName());
                 request = preFilter.apply(request);
-                assets.rebuildContext(attributes, hashOperations);
+                assets.buildContext(attributes, hashOperations, streamOperations);
             }
 
             String environmentName = String.valueOf(attributes.get(GlobalKeys.REQUEST_ENVIRONMENT.getKey()));
@@ -196,11 +71,11 @@ public class RequestHandler {
             for (UnaryOperator<ServerRequest> preFilter : environmentPreFilters) {
                 assets.getLogger(attributes).debug("Will run environment PreFilter: %s", preFilter.getClass().getSimpleName());
                 request = preFilter.apply(request);
-                assets.rebuildContext(attributes, hashOperations);
+                assets.buildContext(attributes, hashOperations, streamOperations);
             }
             /* REMOVE */
             attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), EnvironmentKeys.DEFAULT_TENANT_ID.getKey());
-            assets.rebuildContext(attributes, hashOperations);
+            assets.buildContext(attributes, hashOperations, streamOperations);
 
             String tenantId = String.valueOf(attributes.get(EnvironmentKeys.REQUEST_TENANT_ID.getKey()));
             final List<UnaryOperator<ServerRequest>> tenantPreFilters = getTenantPreFilters(
@@ -212,7 +87,7 @@ public class RequestHandler {
             for (UnaryOperator<ServerRequest> preFilter : tenantPreFilters) {
                 assets.getLogger(attributes).debug("Will run tenant PreFilter: %s", preFilter.getClass().getSimpleName());
                 request = preFilter.apply(request);
-                assets.rebuildContext(attributes, hashOperations);
+                assets.buildContext(attributes, hashOperations, streamOperations);
             }
 
             final String routeId = request.attribute(TenantKeys.ROUTE_ID.getKey()).map(String::valueOf).orElse(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
@@ -226,7 +101,7 @@ public class RequestHandler {
             for (UnaryOperator<ServerRequest> preFilter : routePreFilters) {
                 assets.getLogger(attributes).debug("Will run route PreFilter: %s", preFilter.getClass().getSimpleName());
                 request = preFilter.apply(request);
-                assets.rebuildContext(attributes, hashOperations);
+                assets.buildContext(attributes, hashOperations, streamOperations);
             }
 
             final Optional<HandlerFunction<ServerResponse>> tenantFunction = getTenantFunctions(
@@ -307,8 +182,6 @@ public class RequestHandler {
             final String codeRepositoryUrl,
             final String environmentName
     ) {
-        final GlobalConfiguration globalConfiguration;
-
         final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = environments.get(environmentName);
         if (isNull(environmentConfiguration)) {
             String environmentConfigURL = String.format("%s/imperative-shell/environments/%s/config.json", configRepositoryUrl, environmentName);

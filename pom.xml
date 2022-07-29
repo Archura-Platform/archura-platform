@@ -17,7 +17,7 @@
         <java.version>19</java.version>
         <compiler.source>19</compiler.source>
         <compiler.target>19</compiler.target>
-        <archura-platform-api.version>0.0.1</archura-platform-api.version>
+        <archura-platform-api.version>0.0.2</archura-platform-api.version>
     </properties>
     <dependencies>
         <dependency>

@@ -81,16 +81,14 @@ public class ApplicationConfiguration {
     public RequestHandler requestHandler(
             final Assets assets,
             final ConfigurableBeanFactory beanFactory,
-             @Qualifier("VirtualExecutorService") final ExecutorService executorService
-   ) {
+            @Qualifier("VirtualExecutorService") final ExecutorService executorService
+    ) {
         return new RequestHandler(configRepositoryUrl, defaultHttpClient, assets, beanFactory, executorService);
     }
 
     @Bean
     public RouterFunction<ServerResponse> routes(final RequestHandler requestHandler) {
         return RouterFunctions.route()
-                .route(RequestPredicates.GET("/producer"), requestHandler::handleProducer)
-                .route(RequestPredicates.GET("/consumer"), requestHandler::handleConsumer)
                 .route(RequestPredicates.all(), requestHandler::handle)
                 .build();
     }

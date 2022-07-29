@@ -1,7 +1,6 @@
 package io.archura.platform.internal.configuration;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import io.archura.platform.api.attribute.GlobalKeys;
 import lombok.Data;
 
 import java.util.ArrayList;
@@ -44,6 +43,6 @@ public class IIFEConfiguration {
 
     @Data
     public static class Configuration {
-        private String logLevel = GlobalKeys.DEFAULT_LOG_LEVEL.getKey();
+        private String logLevel;
     }
 }

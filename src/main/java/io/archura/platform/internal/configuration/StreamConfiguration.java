@@ -23,21 +23,11 @@ public class StreamConfiguration {
     @Data
     public static class TenantConfiguration {
         private List<ConsumerConfiguration> consumers = new ArrayList<>();
-        private List<ProducerConfiguration> producers = new ArrayList<>();
         private Configuration config = new Configuration();
     }
 
     @Data
     public static class ConsumerConfiguration {
-        private String name;
-        private String version;
-        private String topic;
-        private String logLevel;
-        private JsonNode config;
-    }
-
-    @Data
-    public static class ProducerConfiguration {
         private String name;
         private String version;
         private String topic;

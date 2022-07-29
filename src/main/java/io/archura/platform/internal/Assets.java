@@ -9,12 +9,15 @@ import io.archura.platform.api.cache.Cache;
 import io.archura.platform.api.context.Context;
 import io.archura.platform.api.exception.ConfigurationException;
 import io.archura.platform.api.logger.Logger;
+import io.archura.platform.api.stream.Stream;
 import io.archura.platform.api.type.Configurable;
 import io.archura.platform.internal.cache.TenantCache;
 import io.archura.platform.internal.context.RequestContext;
 import io.archura.platform.internal.logging.LoggerFactory;
+import io.archura.platform.internal.stream.TenantStream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.HashOperations;
+import org.springframework.data.redis.core.StreamOperations;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,7 +38,7 @@ import static java.util.Objects.isNull;
 public class Assets {
 
     private final Map<String, TenantCache> tenantCacheMap = new HashMap<>();
-    private final Map<String, Logger> tenantLoggerMap = new HashMap<>();
+    private final Map<String, TenantStream> tenantStreamMap = new HashMap<>();
     private final Map<String, Class<?>> remoteClassMap = new HashMap<>();
     private final Map<String, HttpClient> tenantHttpClientMap = new HashMap<>();
     private final ObjectMapper objectMapper;
@@ -78,20 +81,19 @@ public class Assets {
         return object;
     }
 
-    public void rebuildContext(Map<String, Object> attributes, HashOperations<String, String, Map<String, Object>> hashOperations) {
-        final Object contextObject = attributes.get(Context.class.getSimpleName());
-        if (isNull(contextObject)) {
-            attributes.put(Context.class.getSimpleName(), RequestContext.builder().build());
-        }
-        final RequestContext currentContext = (RequestContext) attributes.get(Context.class.getSimpleName());
-        final RequestContext initialContext = currentContext
-                .toBuilder()
+    public void buildContext(
+            final Map<String, Object> attributes,
+            final HashOperations<String, String, Map<String, Object>> hashOperations,
+            final StreamOperations<String, Object, Object> streamOperations
+    ) {
+        final RequestContext context = RequestContext.builder()
                 .cache(getTenantCache(attributes, hashOperations))
+                .stream(getTenantStream(attributes, streamOperations))
                 .logger(getLogger(attributes))
                 .httpClient(getHttpClient(attributes))
                 .objectMapper(getObjectMapper(attributes))
                 .build();
-        attributes.put(Context.class.getSimpleName(), initialContext);
+        attributes.put(Context.class.getSimpleName(), context);
     }
 
     private Optional<Cache> getTenantCache(final Map<String, Object> attributes, final HashOperations<String, String, Map<String, Object>> hashOperations) {
@@ -108,12 +110,25 @@ public class Assets {
         }
     }
 
-    public Logger getLogger(final Map<String, Object> attributes) {
-        final String environmentTenantIdKey = getEnvironmentTenantKey(attributes);
-        if (isNull(tenantLoggerMap.get(environmentTenantIdKey))) {
-            tenantLoggerMap.put(environmentTenantIdKey, LoggerFactory.create(attributes));
+    private Optional<Stream> getTenantStream(
+            final Map<String, Object> attributes,
+            final StreamOperations<String, Object, Object> streamOperations
+    ) {
+        if (attributes.containsKey(GlobalKeys.REQUEST_ENVIRONMENT.getKey())
+                && attributes.containsKey(EnvironmentKeys.REQUEST_TENANT_ID.getKey())) {
+            final String environmentTenantIdKey = getEnvironmentTenantKey(attributes);
+            if (isNull(tenantStreamMap.get(environmentTenantIdKey))) {
+                final TenantStream tenantStream = new TenantStream(environmentTenantIdKey, streamOperations);
+                tenantStreamMap.put(environmentTenantIdKey, tenantStream);
+            }
+            return Optional.of(tenantStreamMap.get(environmentTenantIdKey));
+        } else {
+            return Optional.empty();
         }
-        return tenantLoggerMap.get(environmentTenantIdKey);
+    }
+
+    public Logger getLogger(final Map<String, Object> attributes) {
+        return LoggerFactory.create(attributes);
     }
 
     private HttpClient getHttpClient(final Map<String, Object> attributes) {

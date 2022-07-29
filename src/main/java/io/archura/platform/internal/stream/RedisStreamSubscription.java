@@ -32,7 +32,7 @@ public class RedisStreamSubscription {
 
     private StreamMessageListenerContainer<String, ObjectRecord<String, byte[]>> streamMessageListenerContainer(
             final RedisConnectionFactory redisConnectionFactory,
-            ExecutorService executorService) {
+            final ExecutorService executorService) {
         final StreamMessageListenerContainer.StreamMessageListenerContainerOptions<String, ObjectRecord<String, byte[]>> options = StreamMessageListenerContainer
                 .StreamMessageListenerContainerOptions
                 .builder()
