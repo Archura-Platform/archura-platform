@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.archura.platform.api.cache.Cache;
 import io.archura.platform.api.context.Context;
 import io.archura.platform.api.logger.Logger;
-import io.archura.platform.api.stream.Stream;
+import io.archura.platform.api.stream.LightStream;
 import lombok.Builder;
 import lombok.Data;
 
@@ -16,7 +16,7 @@ import java.util.Optional;
 public class RequestContext implements Context {
 
     private Optional<Cache> cache;
-    private Optional<Stream> stream;
+    private Optional<LightStream> lightStream;
     private Logger logger;
     private HttpClient httpClient;
     private ObjectMapper objectMapper;

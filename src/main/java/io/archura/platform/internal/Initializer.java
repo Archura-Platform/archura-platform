@@ -142,14 +142,20 @@ public class Initializer implements SchedulingConfigurer {
                 final IIFEConfiguration.Configuration tenantConfig = tenantConfiguration.getConfig();
                 final List<IIFEConfiguration.FunctionConfiguration> functions = tenantConfiguration.getFunctions();
                 for (IIFEConfiguration.FunctionConfiguration functionConfiguration : functions) {
-                    // create function
-                    final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
-                    final ContextConsumer contextConsumer = getIIFEFunction(codeRepositoryUrl, functionConfiguration, query);
-                    // create context
-                    final String logLevel = getIIFELogLevel(globalConfig, iffeConfig, environmentConfig, tenantConfig, functionConfiguration);
-                    final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
-                    // invoke function
-                    executorService.submit(() -> contextConsumer.accept(context));
+                    try {
+                        // create context
+                        final String logLevel = getIIFELogLevel(globalConfig, iffeConfig, environmentConfig, tenantConfig, functionConfiguration);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        // create function
+                        final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
+                        final ContextConsumer contextConsumer = getIIFEFunction(codeRepositoryUrl, functionConfiguration, query);
+                        // invoke function
+                        executorService.submit(() -> contextConsumer.accept(context));
+                    } catch (Exception e) {
+                        final String logLevel = getIIFELogLevel(globalConfig, iffeConfig, environmentConfig, tenantConfig, functionConfiguration);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        context.getLogger().error("Error occurred while running IIFE function: %s - %s, error: %s", functionConfiguration.getName(), functionConfiguration.getVersion(), e.getMessage());
+                    }
                 }
             }
         }
@@ -222,8 +228,8 @@ public class Initializer implements SchedulingConfigurer {
     }
 
     private Context createContextForEnvironmentAndTenant(
-            final String tenantId,
             final String environmentName,
+            final String tenantId,
             final String logLevel,
             final HashOperations<String, String, Map<String, Object>> hashOperations,
             final StreamOperations<String, Object, Object> streamOperations
@@ -271,20 +277,27 @@ public class Initializer implements SchedulingConfigurer {
             // loop through tenants
             for (Map.Entry<String, StreamConfiguration.TenantConfiguration> tenantEntry : tenants.entrySet()) {
                 final String tenantId = tenantEntry.getKey();
-                // read IIFE configuration
+                // read stream configuration
                 final StreamConfiguration.TenantConfiguration tenantConfiguration = tenantEntry.getValue();
                 final StreamConfiguration.Configuration tenantConfig = tenantConfiguration.getConfig();
                 final List<StreamConfiguration.ConsumerConfiguration> consumers = tenantConfiguration.getConsumers();
                 for (StreamConfiguration.ConsumerConfiguration consumerConfiguration : consumers) {
-                    // create consumer function
-                    final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
-                    final StreamConsumer streamConsumer = getStreamConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
-                    // create context
-                    final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                    final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
-                    // start/register stream function subscription
-                    final String topic = consumerConfiguration.getTopic();
-                    startStreamConsumerSubscription(environmentName, tenantId, topic, context, streamConsumer, globalConfiguration);
+                    try {
+                        // create context
+                        final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        // create consumer function
+                        final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
+                        final StreamConsumer streamConsumer = getStreamConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
+                        // start/register stream function subscription
+                        final String topic = consumerConfiguration.getTopic();
+                        startStreamConsumerSubscription(environmentName, tenantId, topic, context, streamConsumer, globalConfiguration);
+                    } catch (Exception e) {
+                        // create context
+                        final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        context.getLogger().error("Error occurred while subscribing Stream function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
+                    }
                 }
             }
         }
@@ -399,14 +412,21 @@ public class Initializer implements SchedulingConfigurer {
                 final ScheduledConfiguration.Configuration tenantConfig = tenantConfiguration.getConfig();
                 final List<ScheduledConfiguration.FunctionConfiguration> functions = tenantConfiguration.getFunctions();
                 for (ScheduledConfiguration.FunctionConfiguration scheduledFunctionConfiguration : functions) {
-                    // create consumer function
-                    final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
-                    final ContextConsumer contextConsumer = getScheduledFunction(codeRepositoryUrl, scheduledFunctionConfiguration, query);
-                    // create context
-                    final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
-                    final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
-                    // schedule functions
-                    scheduleFunction(context, contextConsumer, scheduledFunctionConfiguration);
+                    try {
+                        // create context
+                        final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        // create consumer function
+                        final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
+                        final ContextConsumer contextConsumer = getScheduledFunction(codeRepositoryUrl, scheduledFunctionConfiguration, query);
+                        // schedule functions
+                        scheduleFunction(context, contextConsumer, scheduledFunctionConfiguration);
+                    } catch (Exception e) {
+                        // create context
+                        final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        context.getLogger().error("Error occurred while scheduling scheduled function: %s - %s, error: %s", scheduledFunctionConfiguration.getName(), scheduledFunctionConfiguration.getVersion(), e.getMessage());
+                    }
                 }
             }
         }
@@ -485,4 +505,5 @@ public class Initializer implements SchedulingConfigurer {
     public void configureTasks(final ScheduledTaskRegistrar taskRegistrar) {
         this.scheduledTaskRegistrar = taskRegistrar;
     }
+
 }

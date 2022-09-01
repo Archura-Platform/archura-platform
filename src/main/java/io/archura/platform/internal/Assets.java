@@ -9,7 +9,7 @@ import io.archura.platform.api.cache.Cache;
 import io.archura.platform.api.context.Context;
 import io.archura.platform.api.exception.ConfigurationException;
 import io.archura.platform.api.logger.Logger;
-import io.archura.platform.api.stream.Stream;
+import io.archura.platform.api.stream.LightStream;
 import io.archura.platform.api.type.Configurable;
 import io.archura.platform.internal.cache.TenantCache;
 import io.archura.platform.internal.context.RequestContext;
@@ -88,7 +88,7 @@ public class Assets {
     ) {
         final RequestContext context = RequestContext.builder()
                 .cache(getTenantCache(attributes, hashOperations))
-                .stream(getTenantStream(attributes, streamOperations))
+                .lightStream(getTenantStream(attributes, streamOperations))
                 .logger(getLogger(attributes))
                 .httpClient(getHttpClient(attributes))
                 .objectMapper(getObjectMapper(attributes))
@@ -110,7 +110,7 @@ public class Assets {
         }
     }
 
-    private Optional<Stream> getTenantStream(
+    private Optional<LightStream> getTenantStream(
             final Map<String, Object> attributes,
             final StreamOperations<String, Object, Object> streamOperations
     ) {
