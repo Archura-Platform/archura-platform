@@ -1,5 +1,7 @@
 FROM openjdk:19-slim
 
+ARG JAVA_OPTS
+
 ENV APP_NAME=ArchuraPlatformApplication
 ARG APP_HOME=/opt/app
 
@@ -12,4 +14,4 @@ USER app
 ENTRYPOINT java -XX:MaxRAMPercentage=100 -XX:MinRAMPercentage=100 \
 --enable-preview --add-exports java.base/jdk.internal.reflect=ALL-UNNAMED \
 -Ddebug -noverify -Dspring.output.ansi.enabled=always \
--jar ${APP_NAME}.jar
+${JAVA_OPTS} -jar ${APP_NAME}.jar
