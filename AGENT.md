@@ -27,8 +27,8 @@ We need `jvmti.h` header to compile the agent, therefore we need to compile the 
   * `cd ./build/linux-x86_64-server-release/images/jdk/include/`
 * copy the `filtersfunctions.cpp` file into this folder, after that you can build the agent, you'll need the files from `jdk/include` and `native/include` folders
   * `g++ -I/home/USERNAME/jdk/openjdk-git/build/linux-x86_64-server-release/images/jdk/include -I/home/USERNAME/jdk/openjdk-git/src/java.base/unix/native/include -fPIC -shared -olibfiltersfunctions.so -Wl,-soname,libfiltersfunctions.so filtersfunctions.cpp`
-* now you can run the java application with the agent
-  * `java -agentpath:/home/USERNAME/jdk/openjdk-git/build/linux-x86_64-server-release/images/jdk/include/libfiltersfunctions.so --enable-preview --add-exports java.base/jdk.internal.reflect=ALL-UNNAMED  -jar /tmp/archura-platform-0.0.1-SNAPSHOT.jar`
+* now you can run the java application with the agent and pass the entry 'Class/Method' for the filters and functions 
+  * `java -agentpath:/home/USERNAME/jdk/openjdk-git/build/linux-x86_64-server-release/images/jdk/include/libfiltersfunctions.so='Lio/archura/platform/internal/RequestHandler;execute' --enable-preview --add-exports java.base/jdk.internal.reflect=ALL-UNNAMED  -jar /tmp/archura-platform-0.0.1-SNAPSHOT.jar`
 * you should see a warning message similar to the following, indicating that the `Thread.start0` native method is replaced
   * `[0.041s][warning][jni,resolve] Re-registering of platform native method: java.lang.Thread.start0()V from code in a different classloader`
 * and when you try to create a Thread within a Filter or a Function, you should see an error similar to the following

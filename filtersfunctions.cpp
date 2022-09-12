@@ -4,6 +4,8 @@
 
 extern "C" void JNICALL JVM_StartThread(JNIEnv* env, jthread thread);
 
+std::string executePath;
+
 void JNICALL ThreadStart0Hook(JNIEnv* env, jthread thread) {
 
 	JavaVM* vm;
@@ -23,7 +25,6 @@ void JNICALL ThreadStart0Hook(JNIEnv* env, jthread thread) {
 		char *mname;
 		jclass declaring_class;
 		char *declaringClassName;
-		std::string executePath("Lio/archura/platform/internal/RequestHandler;execute");
 
 		for(int i=0; i< count; i++){
 			err = jvmti->GetMethodName(frames[i].method, &mname, NULL, NULL);
@@ -52,6 +53,8 @@ void JNICALL VMInit(jvmtiEnv* jvmti, JNIEnv* env, jthread thread) {
 }
 
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
+    executePath.append(options);
+
     jvmtiEnv* jvmti;
     vm->GetEnv((void**)&jvmti, JVMTI_VERSION_1_0);
 
