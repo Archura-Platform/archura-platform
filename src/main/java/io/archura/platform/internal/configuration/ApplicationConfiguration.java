@@ -2,8 +2,10 @@ package io.archura.platform.internal.configuration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.archura.platform.internal.Assets;
+import io.archura.platform.internal.FilterFunctionExecutor;
 import io.archura.platform.internal.Initializer;
 import io.archura.platform.internal.RequestHandler;
+import io.archura.platform.internal.stream.RedisStreamSubscription;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
@@ -78,19 +80,22 @@ public class ApplicationConfiguration {
     @Bean
     public Initializer initializer(
             final ConfigurableBeanFactory beanFactory,
+            final RedisStreamSubscription redisStreamSubscription,
+            final FilterFunctionExecutor filterFunctionExecutor,
             @Qualifier("VirtualExecutorService") final ExecutorService executorService,
             final Assets assets
     ) {
-        return new Initializer(configRepositoryUrl, configurationHttpClient, beanFactory, threadFactory, executorService, assets);
+        return new Initializer(configRepositoryUrl, configurationHttpClient, beanFactory, threadFactory, executorService, assets, redisStreamSubscription, filterFunctionExecutor);
     }
 
     @Bean
     public RequestHandler requestHandler(
             final Assets assets,
             final ConfigurableBeanFactory beanFactory,
+            final FilterFunctionExecutor filterFunctionExecutor,
             @Qualifier("VirtualExecutorService") final ExecutorService executorService
     ) {
-        return new RequestHandler(configRepositoryUrl, defaultHttpClient, assets, beanFactory, executorService);
+        return new RequestHandler(configRepositoryUrl, defaultHttpClient, assets, beanFactory, filterFunctionExecutor);
     }
 
     @Bean

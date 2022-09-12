@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
 import java.util.function.BiFunction;
 import java.util.function.UnaryOperator;
 
@@ -39,7 +38,7 @@ public class RequestHandler {
     private final HttpClient defaultHttpClient;
     private final Assets assets;
     private final ConfigurableBeanFactory beanFactory;
-    private final ExecutorService executorService;
+    private final FilterFunctionExecutor filterFunctionExecutor;
 
     public ServerResponse handle(ServerRequest request) {
         try {
@@ -58,7 +57,7 @@ public class RequestHandler {
             );
             for (UnaryOperator<ServerRequest> preFilter : globalPreFilters) {
                 assets.getLogger(attributes).debug("Will run global PreFilter: %s", preFilter.getClass().getSimpleName());
-                request = execute(request, preFilter);
+                request = filterFunctionExecutor.execute(request, preFilter);
                 assets.buildContext(attributes, hashOperations, streamOperations);
             }
 
@@ -70,7 +69,7 @@ public class RequestHandler {
             );
             for (UnaryOperator<ServerRequest> preFilter : environmentPreFilters) {
                 assets.getLogger(attributes).debug("Will run environment PreFilter: %s", preFilter.getClass().getSimpleName());
-                request = execute(request, preFilter);
+                request = filterFunctionExecutor.execute(request, preFilter);
                 assets.buildContext(attributes, hashOperations, streamOperations);
             }
             /* REMOVE */
@@ -86,7 +85,7 @@ public class RequestHandler {
             );
             for (UnaryOperator<ServerRequest> preFilter : tenantPreFilters) {
                 assets.getLogger(attributes).debug("Will run tenant PreFilter: %s", preFilter.getClass().getSimpleName());
-                request = execute(request, preFilter);
+                request = filterFunctionExecutor.execute(request, preFilter);
                 assets.buildContext(attributes, hashOperations, streamOperations);
             }
 
@@ -100,7 +99,7 @@ public class RequestHandler {
             );
             for (UnaryOperator<ServerRequest> preFilter : routePreFilters) {
                 assets.getLogger(attributes).debug("Will run route PreFilter: %s", preFilter.getClass().getSimpleName());
-                request = execute(request, preFilter);
+                request = filterFunctionExecutor.execute(request, preFilter);
                 assets.buildContext(attributes, hashOperations, streamOperations);
             }
 
@@ -116,7 +115,7 @@ public class RequestHandler {
             ServerResponse response;
             if (tenantFunctionOptional.isPresent()) {
                 final HandlerFunction<ServerResponse> tenantFunction = tenantFunctionOptional.get();
-                response = execute(request, tenantFunction);
+                response = filterFunctionExecutor.execute(request, tenantFunction);
             } else {
                 response = ServerResponse
                         .notFound()
@@ -133,7 +132,7 @@ public class RequestHandler {
             );
             for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : routePostFilters) {
                 assets.getLogger(attributes).debug("Will run route PostFilter: %s", postFilter.getClass().getSimpleName());
-                response = execute
+                response = filterFunctionExecutor.execute
                         (request, response, postFilter);
             }
 
@@ -145,7 +144,7 @@ public class RequestHandler {
             );
             for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : tenantPostFilters) {
                 assets.getLogger(attributes).debug("Will run tenant PostFilter: %s", postFilter.getClass().getSimpleName());
-                response = execute(request, response, postFilter);
+                response = filterFunctionExecutor.execute(request, response, postFilter);
             }
 
             final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> environmentPostFilters = getEnvironmentPostFilters(
@@ -155,7 +154,7 @@ public class RequestHandler {
             );
             for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : environmentPostFilters) {
                 assets.getLogger(attributes).debug("Will run environment PostFilter: %s", postFilter.getClass().getSimpleName());
-                response = execute(request, response, postFilter);
+                response = filterFunctionExecutor.execute(request, response, postFilter);
             }
             final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> globalPostFilters = getGlobalPostFilters(
                     globalConfiguration.getPost(),
@@ -163,24 +162,12 @@ public class RequestHandler {
             );
             for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : globalPostFilters) {
                 assets.getLogger(attributes).debug("Will run global PostFilter: %s", postFilter.getClass().getSimpleName());
-                response = execute(request, response, postFilter);
+                response = filterFunctionExecutor.execute(request, response, postFilter);
             }
             return response;
         } catch (Exception e) {
             return this.getErrorResponse(e, request);
         }
-    }
-
-    public ServerRequest execute(ServerRequest request, UnaryOperator<ServerRequest> preFilter) {
-        return preFilter.apply(request);
-    }
-
-    public ServerResponse execute(ServerRequest request, HandlerFunction<ServerResponse> tenantFunction) throws Exception {
-        return tenantFunction.handle(request);
-    }
-
-    public ServerResponse execute(ServerRequest request, ServerResponse response, BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter) {
-        return postFilter.apply(request, response);
     }
 
     private List<UnaryOperator<ServerRequest>> getGlobalPreFilters(

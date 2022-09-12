@@ -55,7 +55,8 @@ public class Initializer implements SchedulingConfigurer {
     private final ThreadFactory threadFactory;
     private final ExecutorService executorService;
     private final Assets assets;
-    private final RedisStreamSubscription redisStreamSubscription = new RedisStreamSubscription();
+    private final RedisStreamSubscription redisStreamSubscription;
+    private final FilterFunctionExecutor filterFunctionExecutor;
     private ScheduledTaskRegistrar scheduledTaskRegistrar;
 
     public void initialize() {
@@ -150,7 +151,7 @@ public class Initializer implements SchedulingConfigurer {
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final ContextConsumer contextConsumer = getIIFEFunction(codeRepositoryUrl, functionConfiguration, query);
                         // invoke function
-                        executorService.submit(() -> contextConsumer.accept(context));
+                        executorService.submit(() -> filterFunctionExecutor.execute(context, contextConsumer));
                     } catch (Exception e) {
                         final String logLevel = getIIFELogLevel(globalConfig, iffeConfig, environmentConfig, tenantConfig, functionConfiguration);
                         final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
@@ -350,7 +351,7 @@ public class Initializer implements SchedulingConfigurer {
                 message -> {
                     final byte[] key = message.getId().getValue().getBytes(StandardCharsets.UTF_8);
                     final byte[] value = message.getValue();
-                    streamConsumer.consume(context, key, value);
+                    filterFunctionExecutor.execute(context, streamConsumer, key, value);
                 };
         final LettuceConnectionFactory redisConnectionFactory = globalConfiguration.getCacheConfiguration().getRedisConnectionFactory();
         final Subscription subscription = redisStreamSubscription.createConsumerSubscription(
@@ -493,7 +494,7 @@ public class Initializer implements SchedulingConfigurer {
                     .map(TimeZone::getTimeZone)
                     .orElse(TimeZone.getTimeZone(ZoneOffset.UTC));
             final CronTrigger cronTrigger = new CronTrigger(cron, timeZone);
-            final CronTask cronTask = new CronTask(() -> contextConsumer.accept(context), cronTrigger);
+            final CronTask cronTask = new CronTask(() -> filterFunctionExecutor.execute(context, contextConsumer), cronTrigger);
             scheduledTaskRegistrar.scheduleCronTask(cronTask);
             logger.debug("Scheduled function '%s' with cron '%s' and time zone '%s'", scheduledFunctionName, cron, timeZone.getDisplayName());
         } else {

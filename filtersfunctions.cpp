@@ -28,7 +28,7 @@ void JNICALL ThreadStart0Hook(JNIEnv* env, jthread thread) {
 
 		for(int i=0; i< count; i++){
 			err = jvmti->GetMethodName(frames[i].method, &mname, NULL, NULL);
-		    //printf(">>>>> method name: %s signature: %s generic: %s\n", mname, msignature, mgeneric);
+            //printf(">>>>> method name: %s signature: %s generic: %s\n", mname, msignature, mgeneric);
 			err = jvmti->GetMethodDeclaringClass(frames[i].method, &declaring_class);
 			err = jvmti->GetClassSignature(declaring_class, &declaringClassName, NULL);
 			if(err == JVMTI_ERROR_NONE) {
@@ -54,6 +54,7 @@ void JNICALL VMInit(jvmtiEnv* jvmti, JNIEnv* env, jthread thread) {
 
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     executePath.append(options);
+    //std::cout << "executePath: " << executePath << "\n";
 
     jvmtiEnv* jvmti;
     vm->GetEnv((void**)&jvmti, JVMTI_VERSION_1_0);

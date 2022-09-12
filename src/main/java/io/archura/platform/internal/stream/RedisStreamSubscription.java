@@ -9,12 +9,14 @@ import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.stream.StreamListener;
 import org.springframework.data.redis.stream.StreamMessageListenerContainer;
 import org.springframework.data.redis.stream.Subscription;
+import org.springframework.stereotype.Component;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 
+@Component
 public class RedisStreamSubscription {
 
     public Subscription createConsumerSubscription(
@@ -32,7 +34,8 @@ public class RedisStreamSubscription {
 
     private StreamMessageListenerContainer<String, ObjectRecord<String, byte[]>> streamMessageListenerContainer(
             final RedisConnectionFactory redisConnectionFactory,
-            final ExecutorService executorService) {
+            final ExecutorService executorService
+    ) {
         final StreamMessageListenerContainer.StreamMessageListenerContainerOptions<String, ObjectRecord<String, byte[]>> options = StreamMessageListenerContainer
                 .StreamMessageListenerContainerOptions
                 .builder()
