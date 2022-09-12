@@ -58,7 +58,7 @@ public class RequestHandler {
             );
             for (UnaryOperator<ServerRequest> preFilter : globalPreFilters) {
                 assets.getLogger(attributes).debug("Will run global PreFilter: %s", preFilter.getClass().getSimpleName());
-                request = preFilter.apply(request);
+                request = execute(request, preFilter);
                 assets.buildContext(attributes, hashOperations, streamOperations);
             }
 
@@ -70,7 +70,7 @@ public class RequestHandler {
             );
             for (UnaryOperator<ServerRequest> preFilter : environmentPreFilters) {
                 assets.getLogger(attributes).debug("Will run environment PreFilter: %s", preFilter.getClass().getSimpleName());
-                request = preFilter.apply(request);
+                request = execute(request, preFilter);
                 assets.buildContext(attributes, hashOperations, streamOperations);
             }
             /* REMOVE */
@@ -86,7 +86,7 @@ public class RequestHandler {
             );
             for (UnaryOperator<ServerRequest> preFilter : tenantPreFilters) {
                 assets.getLogger(attributes).debug("Will run tenant PreFilter: %s", preFilter.getClass().getSimpleName());
-                request = preFilter.apply(request);
+                request = execute(request, preFilter);
                 assets.buildContext(attributes, hashOperations, streamOperations);
             }
 
@@ -100,25 +100,29 @@ public class RequestHandler {
             );
             for (UnaryOperator<ServerRequest> preFilter : routePreFilters) {
                 assets.getLogger(attributes).debug("Will run route PreFilter: %s", preFilter.getClass().getSimpleName());
-                request = preFilter.apply(request);
+                request = execute(request, preFilter);
                 assets.buildContext(attributes, hashOperations, streamOperations);
             }
 
-            final Optional<HandlerFunction<ServerResponse>> tenantFunction = getTenantFunctions(
+            final Optional<HandlerFunction<ServerResponse>> tenantFunctionOptional = getTenantFunctions(
                     globalConfiguration.getEnvironments(),
                     globalConfiguration.getConfig().getCodeRepositoryUrl(),
                     environmentName,
                     tenantId,
                     routeId
             );
-            assets.getLogger(attributes).debug("Will run TenantFunction: %s", tenantFunction);
-            ServerResponse response = tenantFunction
-                    .orElse(r -> ServerResponse
-                            .notFound()
-                            .header(String.format("X-A-NotFound-%s-%s-%s", environmentName, tenantId, routeId))
-                            .build()
-                    )
-                    .handle(request);
+            assets.getLogger(attributes).debug("Will run TenantFunction: %s", tenantFunctionOptional);
+
+            ServerResponse response;
+            if (tenantFunctionOptional.isPresent()) {
+                final HandlerFunction<ServerResponse> tenantFunction = tenantFunctionOptional.get();
+                response = execute(request, tenantFunction);
+            } else {
+                response = ServerResponse
+                        .notFound()
+                        .header(String.format("X-A-NotFound-%s-%s-%s", environmentName, tenantId, routeId))
+                        .build();
+            }
 
             final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> routePostFilters = getRoutePostFilters(
                     globalConfiguration.getEnvironments(),
@@ -129,7 +133,8 @@ public class RequestHandler {
             );
             for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : routePostFilters) {
                 assets.getLogger(attributes).debug("Will run route PostFilter: %s", postFilter.getClass().getSimpleName());
-                response = postFilter.apply(request, response);
+                response = execute
+                        (request, response, postFilter);
             }
 
             final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> tenantPostFilters = getTenantPostFilters(
@@ -140,7 +145,7 @@ public class RequestHandler {
             );
             for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : tenantPostFilters) {
                 assets.getLogger(attributes).debug("Will run tenant PostFilter: %s", postFilter.getClass().getSimpleName());
-                response = postFilter.apply(request, response);
+                response = execute(request, response, postFilter);
             }
 
             final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> environmentPostFilters = getEnvironmentPostFilters(
@@ -150,7 +155,7 @@ public class RequestHandler {
             );
             for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : environmentPostFilters) {
                 assets.getLogger(attributes).debug("Will run environment PostFilter: %s", postFilter.getClass().getSimpleName());
-                response = postFilter.apply(request, response);
+                response = execute(request, response, postFilter);
             }
             final List<BiFunction<ServerRequest, ServerResponse, ServerResponse>> globalPostFilters = getGlobalPostFilters(
                     globalConfiguration.getPost(),
@@ -158,7 +163,7 @@ public class RequestHandler {
             );
             for (BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter : globalPostFilters) {
                 assets.getLogger(attributes).debug("Will run global PostFilter: %s", postFilter.getClass().getSimpleName());
-                response = postFilter.apply(request, response);
+                response = execute(request, response, postFilter);
             }
             return response;
         } catch (Exception e) {
@@ -166,6 +171,17 @@ public class RequestHandler {
         }
     }
 
+    public ServerRequest execute(ServerRequest request, UnaryOperator<ServerRequest> preFilter) {
+        return preFilter.apply(request);
+    }
+
+    public ServerResponse execute(ServerRequest request, HandlerFunction<ServerResponse> tenantFunction) throws Exception {
+        return tenantFunction.handle(request);
+    }
+
+    public ServerResponse execute(ServerRequest request, ServerResponse response, BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter) {
+        return postFilter.apply(request, response);
+    }
 
     private List<UnaryOperator<ServerRequest>> getGlobalPreFilters(
             final List<GlobalConfiguration.PreFilterConfiguration> preFilterConfigurations,

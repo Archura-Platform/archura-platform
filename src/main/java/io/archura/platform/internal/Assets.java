@@ -72,13 +72,17 @@ public class Assets {
             remoteClassMap.put(resourceUrl, remoteClass);
         }
         final Object object = remoteClassMap.get(resourceUrl).getDeclaredConstructor().newInstance();
+        configure(jsonNode, object);
+        return object;
+    }
+
+    public void configure(JsonNode jsonNode, Object object) {
         if (Configurable.class.isAssignableFrom(object.getClass())) {
             final Configurable configurable = (Configurable) object;
             final Map<String, Object> config = objectMapper.convertValue(jsonNode, new TypeReference<>() {
             });
             configurable.setConfiguration(Collections.unmodifiableMap(config));
         }
-        return object;
     }
 
     public void buildContext(
