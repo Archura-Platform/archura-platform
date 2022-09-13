@@ -5,6 +5,7 @@ import io.archura.platform.internal.Assets;
 import io.archura.platform.internal.FilterFunctionExecutor;
 import io.archura.platform.internal.Initializer;
 import io.archura.platform.internal.RequestHandler;
+import io.archura.platform.internal.RequestInterceptor;
 import io.archura.platform.internal.stream.RedisStreamSubscription;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,6 +16,8 @@ import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactor
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.web.servlet.function.RequestPredicates;
 import org.springframework.web.servlet.function.RouterFunction;
 import org.springframework.web.servlet.function.RouterFunctions;
@@ -29,7 +32,7 @@ import java.util.concurrent.ThreadFactory;
 
 @Configuration
 @EnableScheduling
-public class ApplicationConfiguration {
+public class ApplicationConfiguration implements WebMvcConfigurer {
 
     @Value("${config.repository.url:http://config-service/}")
     private String configRepositoryUrl;
@@ -38,6 +41,15 @@ public class ApplicationConfiguration {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ThreadFactory threadFactory = getThreadFactory();
 
+    @Bean
+    public RequestInterceptor requestInterceptor() {
+        return new RequestInterceptor();
+    }
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(requestInterceptor());
+    }
 
     @Bean
     public ApplicationRunner prepareConfigurations(final Initializer initializer) {
