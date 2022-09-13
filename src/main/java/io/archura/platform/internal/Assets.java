@@ -27,7 +27,6 @@ import java.net.URLClassLoader;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -43,6 +42,7 @@ public class Assets {
     private final Map<String, HttpClient> tenantHttpClientMap = new HashMap<>();
     private final ObjectMapper objectMapper;
     private final HttpClient defaultHttpClient;
+    private final FilterFunctionExecutor filterFunctionExecutor;
 
     public <T> T getConfiguration(HttpClient configurationHttpClient, String url, Class<T> tClass) {
         HttpRequest request = HttpRequest.newBuilder()
@@ -81,7 +81,7 @@ public class Assets {
             final Configurable configurable = (Configurable) object;
             final Map<String, Object> config = objectMapper.convertValue(jsonNode, new TypeReference<>() {
             });
-            configurable.setConfiguration(Collections.unmodifiableMap(config));
+            filterFunctionExecutor.execute(configurable, config);
         }
     }
 

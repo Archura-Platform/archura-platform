@@ -1,6 +1,7 @@
 package io.archura.platform.internal;
 
 import io.archura.platform.api.context.Context;
+import io.archura.platform.api.type.Configurable;
 import io.archura.platform.api.type.functionalcore.ContextConsumer;
 import io.archura.platform.api.type.functionalcore.StreamConsumer;
 import org.springframework.stereotype.Component;
@@ -8,6 +9,8 @@ import org.springframework.web.servlet.function.HandlerFunction;
 import org.springframework.web.servlet.function.ServerRequest;
 import org.springframework.web.servlet.function.ServerResponse;
 
+import java.util.Collections;
+import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.UnaryOperator;
 
@@ -32,6 +35,10 @@ public class FilterFunctionExecutor {
 
     public ServerResponse execute(ServerRequest request, ServerResponse response, BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter) {
         return postFilter.apply(request, response);
+    }
+
+    public void execute(Configurable configurable, Map<String, Object> config) {
+        configurable.setConfiguration(Collections.unmodifiableMap(config));
     }
 
 }

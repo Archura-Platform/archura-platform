@@ -73,8 +73,10 @@ public class ApplicationConfiguration {
 
 
     @Bean
-    public Assets assets() {
-        return new Assets(objectMapper, defaultHttpClient);
+    public Assets assets(
+            final FilterFunctionExecutor filterFunctionExecutor
+    ) {
+        return new Assets(objectMapper, defaultHttpClient, filterFunctionExecutor);
     }
 
     @Bean
