@@ -1,4 +1,4 @@
-package io.archura.platform.internal;
+package io.archura.platform.external;
 
 import io.archura.platform.api.context.Context;
 import io.archura.platform.api.type.Configurable;

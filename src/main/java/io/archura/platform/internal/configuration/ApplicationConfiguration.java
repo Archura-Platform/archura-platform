@@ -1,8 +1,8 @@
 package io.archura.platform.internal.configuration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.Assets;
-import io.archura.platform.internal.FilterFunctionExecutor;
 import io.archura.platform.internal.Initializer;
 import io.archura.platform.internal.RequestHandler;
 import io.archura.platform.internal.RequestInterceptor;

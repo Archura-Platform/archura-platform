@@ -11,6 +11,7 @@ import io.archura.platform.api.exception.ConfigurationException;
 import io.archura.platform.api.logger.Logger;
 import io.archura.platform.api.stream.LightStream;
 import io.archura.platform.api.type.Configurable;
+import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.cache.TenantCache;
 import io.archura.platform.internal.context.RequestContext;
 import io.archura.platform.internal.logging.LoggerFactory;

@@ -8,6 +8,7 @@ import io.archura.platform.api.exception.FunctionIsNotAHandlerFunctionException;
 import io.archura.platform.api.exception.PostFilterIsNotABiFunctionException;
 import io.archura.platform.api.exception.PreFilterIsNotAUnaryOperatorException;
 import io.archura.platform.api.exception.ResourceLoadException;
+import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
