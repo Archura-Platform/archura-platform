@@ -1,18 +1,21 @@
-package io.archura.platform.internal.security;
+package io.archura.platform.securitymanager;
 
 import io.archura.platform.external.FilterFunctionExecutor;
+
 import java.security.Permission;
 
 public class ThreadSecurityManager extends SecurityManager {
 
     @Override
     public void checkPermission(Permission perm) {
-        checkSocketAccess(perm);
+        checkPermission(perm, null);
     }
 
     @Override
     public void checkPermission(Permission perm, Object context) {
-        checkSocketAccess(perm);
+        if ("java.net.SocketPermission".equals(perm.getClass().getName())) {
+            checkSocketAccess(perm);
+        }
     }
 
     @Override
@@ -22,17 +25,15 @@ public class ThreadSecurityManager extends SecurityManager {
     }
 
     private void checkSocketAccess(final Permission perm) {
-        if (java.net.SocketPermission.class.isAssignableFrom(perm.getClass())) {
-            boolean isAllowedAPI = false;
-            for (StackTraceElement element : Thread.currentThread().getStackTrace()) {
-                if (element.getClassName().startsWith("io.archura.platform.internal")
-                || element.getClassName().equals("jdk.internal.net.http.HttpClientFacade")) {
-                    isAllowedAPI = true;
-                    continue;
-                }
-                if (!isAllowedAPI && element.getClassName().equals(FilterFunctionExecutor.class.getName())) {
-                    throw new RuntimeException("Cannot create Sockets!");
-                }
+        boolean isAllowedAPI = false;
+        for (StackTraceElement element : Thread.currentThread().getStackTrace()) {
+            if (element.getClassName().startsWith("io.archura.platform.internal")
+                    || element.getClassName().equals("jdk.internal.net.http.HttpClientFacade")) {
+                isAllowedAPI = true;
+                continue;
+            }
+            if (!isAllowedAPI && element.getClassName().equals(FilterFunctionExecutor.class.getName())) {
+                throw new RuntimeException("Filters and Functions are not allowed to create sockets.");
             }
         }
     }
@@ -45,7 +46,7 @@ public class ThreadSecurityManager extends SecurityManager {
                 continue;
             }
             if (!isArchuraAPI && element.getClassName().equals(FilterFunctionExecutor.class.getName())) {
-                throw new RuntimeException("Cannot create Threads!");
+                throw new RuntimeException("Filters and Functions are not allowed to create Threads.");
             }
         }
     }
