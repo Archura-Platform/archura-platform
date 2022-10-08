@@ -260,7 +260,7 @@ public class RequestHandler {
         final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
-            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
+            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig(), configuration.isReload());
             if (UnaryOperator.class.isAssignableFrom(object.getClass())) {
                 @SuppressWarnings("unchecked") final UnaryOperator<ServerRequest> consumer = (UnaryOperator<ServerRequest>) object;
                 return consumer;
@@ -309,7 +309,7 @@ public class RequestHandler {
         final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
-            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
+            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig(), configuration.isReload());
             if (HandlerFunction.class.isAssignableFrom(object.getClass())) {
                 @SuppressWarnings("unchecked") final HandlerFunction<ServerResponse> handlerFunction = (HandlerFunction<ServerResponse>) object;
                 return handlerFunction;
@@ -353,8 +353,6 @@ public class RequestHandler {
             final String environmentName,
             final String tenantId
     ) {
-        final GlobalConfiguration globalConfiguration;
-
         final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = environments.get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Collections.emptyList();
@@ -400,7 +398,7 @@ public class RequestHandler {
         String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
-            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
+            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig(), configuration.isReload());
             if (BiFunction.class.isAssignableFrom(object.getClass())) {
                 @SuppressWarnings("unchecked") final BiFunction<ServerRequest, ServerResponse, ServerResponse> filter = (BiFunction<ServerRequest, ServerResponse, ServerResponse>) object;
                 return filter;

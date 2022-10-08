@@ -31,6 +31,7 @@ import java.net.http.HttpResponse;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
 
 import static java.util.Objects.isNull;
 
@@ -44,6 +45,7 @@ public class Assets {
     private final ObjectMapper objectMapper;
     private final HttpClient defaultHttpClient;
     private final FilterFunctionExecutor filterFunctionExecutor;
+    private final Random random = new Random();
 
     public <T> T getConfiguration(HttpClient configurationHttpClient, String url, Class<T> tClass) {
         HttpRequest request = HttpRequest.newBuilder()
@@ -64,12 +66,21 @@ public class Assets {
         }
     }
 
-    public Object createObject(String resourceUrl, String resourceKey, String className, JsonNode jsonNode)
+    public Object createObject(String resourceUrl, String resourceKey, String className, JsonNode jsonNode, boolean reload)
             throws IOException, ReflectiveOperationException {
+        if (reload) {
+            remoteClassMap.remove(resourceUrl);
+            final URL url = new URL(String.format("%s&%s", resourceKey, random.nextDouble()));
+            final URLClassLoader classLoader = new URLClassLoader(new URL[]{url}, ClassLoader.getSystemClassLoader());
+            final Class<?> remoteClass = classLoader.loadClass(className);
+            final Object object = remoteClass.getDeclaredConstructor().newInstance();
+            configure(jsonNode, object);
+            return object;
+        }
         if (isNull(remoteClassMap.get(resourceUrl))) {
             final URL url = new URL(resourceKey);
-            final URLClassLoader classLoader = new URLClassLoader(new URL[]{url}, Thread.currentThread().getContextClassLoader());
-            final Class<?> remoteClass = Class.forName(className, true, classLoader);
+            final URLClassLoader classLoader = new URLClassLoader(new URL[]{url}, ClassLoader.getSystemClassLoader());
+            final Class<?> remoteClass = classLoader.loadClass(className);
             remoteClassMap.put(resourceUrl, remoteClass);
         }
         final Object object = remoteClassMap.get(resourceUrl).getDeclaredConstructor().newInstance();

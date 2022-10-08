@@ -31,6 +31,7 @@ public class GlobalConfiguration {
     public static class PreFilterConfiguration {
         private String name;
         private String version;
+        private boolean reload;
         private JsonNode config;
     }
 
@@ -38,6 +39,7 @@ public class GlobalConfiguration {
     public static class PostFilterConfiguration {
         private String name;
         private String version;
+        private boolean reload;
         private JsonNode config;
     }
 
@@ -66,6 +68,7 @@ public class GlobalConfiguration {
             public static class FunctionConfiguration {
                 private String name;
                 private String version;
+                private boolean reload;
                 private JsonNode config;
             }
         }

@@ -33,6 +33,7 @@ public class ScheduledConfiguration {
         private String cron;
         private String zone;
         private String logLevel;
+        private boolean reload;
         private JsonNode config;
     }
 

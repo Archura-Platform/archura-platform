@@ -30,6 +30,7 @@ public class IIFEConfiguration {
         private String name;
         private String version;
         private String logLevel;
+        private boolean reload;
         private JsonNode config;
     }
 

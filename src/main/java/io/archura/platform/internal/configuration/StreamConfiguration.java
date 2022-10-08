@@ -32,6 +32,7 @@ public class StreamConfiguration {
         private String version;
         private String topic;
         private String logLevel;
+        private boolean reload;
         private JsonNode config;
     }
 
