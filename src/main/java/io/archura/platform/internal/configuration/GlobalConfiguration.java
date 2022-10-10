@@ -11,6 +11,8 @@ import java.util.Map;
 
 @Data
 public class GlobalConfiguration {
+    private static GlobalConfiguration instance = new GlobalConfiguration();
+
     private List<PreFilterConfiguration> pre = new ArrayList<>();
     private List<PostFilterConfiguration> post = new ArrayList<>();
     private Map<String, EnvironmentConfiguration> environments = new HashMap<>();
@@ -19,6 +21,14 @@ public class GlobalConfiguration {
     private IIFEConfiguration iifeConfiguration;
     private StreamConfiguration streamConfiguration;
     private ScheduledConfiguration scheduledConfiguration;
+
+    public static void setInstance(final GlobalConfiguration globalConfiguration) {
+        instance = globalConfiguration;
+    }
+
+    public static GlobalConfiguration getInstance() {
+        return instance;
+    }
 
     @Data
     public static class GlobalConfig extends Configuration {

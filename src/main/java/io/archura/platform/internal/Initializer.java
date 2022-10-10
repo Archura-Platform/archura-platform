@@ -15,61 +15,53 @@ import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.configuration.IIFEConfiguration;
 import io.archura.platform.internal.configuration.ScheduledConfiguration;
 import io.archura.platform.internal.configuration.StreamConfiguration;
-import io.archura.platform.internal.stream.RedisStreamSubscription;
-import io.lettuce.core.RedisBusyException;
+import io.archura.platform.internal.schedule.FunctionJob;
+import io.archura.platform.internal.schedule.FunctionScheduler;
+import io.lettuce.core.StreamMessage;
+import io.lettuce.core.XGroupCreateArgs;
+import io.lettuce.core.XReadArgs;
+import io.lettuce.core.api.sync.RedisCommands;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.NoSuchBeanDefinitionException;
-import org.springframework.beans.factory.config.ConfigurableBeanFactory;
-import org.springframework.beans.factory.support.DefaultListableBeanFactory;
-import org.springframework.data.redis.RedisSystemException;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.connection.stream.ObjectRecord;
-import org.springframework.data.redis.core.HashOperations;
-import org.springframework.data.redis.core.StreamOperations;
-import org.springframework.data.redis.stream.StreamListener;
-import org.springframework.data.redis.stream.Subscription;
-import org.springframework.scheduling.annotation.SchedulingConfigurer;
-import org.springframework.scheduling.config.CronTask;
-import org.springframework.scheduling.config.ScheduledTaskRegistrar;
-import org.springframework.scheduling.support.CronTrigger;
+import lombok.SneakyThrows;
+import org.quartz.CronScheduleBuilder;
+import org.quartz.JobBuilder;
+import org.quartz.JobDataMap;
+import org.quartz.JobDetail;
+import org.quartz.Scheduler;
+import org.quartz.Trigger;
+import org.quartz.TriggerBuilder;
+import org.quartz.core.QuartzSchedulerResources;
+import org.quartz.impl.StdScheduler;
 
 import java.net.http.HttpClient;
-import java.nio.charset.StandardCharsets;
-import java.time.ZoneOffset;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.ThreadFactory;
 
 import static java.util.Objects.nonNull;
 
 @RequiredArgsConstructor
-public class Initializer implements SchedulingConfigurer {
+public class Initializer {
 
     private final String configRepositoryUrl;
     private final HttpClient configurationHttpClient;
-    private final ConfigurableBeanFactory beanFactory;
-    private final ThreadFactory threadFactory;
     private final ExecutorService executorService;
     private final Assets assets;
-    private final RedisStreamSubscription redisStreamSubscription;
     private final FilterFunctionExecutor filterFunctionExecutor;
-    private ScheduledTaskRegistrar scheduledTaskRegistrar;
+
 
     public void initialize() {
-        final GlobalConfiguration globalConfiguration = loadGlobalConfiguration(beanFactory);
+        final GlobalConfiguration globalConfiguration = loadGlobalConfiguration();
         handleIIFEFunctions(globalConfiguration);
         handleStreamFunctions(globalConfiguration);
         handleScheduledFunctions(globalConfiguration);
     }
 
-    private GlobalConfiguration loadGlobalConfiguration(ConfigurableBeanFactory beanFactory) {
+    private GlobalConfiguration loadGlobalConfiguration() {
         final GlobalConfiguration globalConfiguration = createGlobalConfiguration();
-        registerGlobalConfigurationBean(beanFactory, globalConfiguration);
+        GlobalConfiguration.setInstance(globalConfiguration);
         return globalConfiguration;
     }
 
@@ -89,21 +81,7 @@ public class Initializer implements SchedulingConfigurer {
     private CacheConfiguration createCacheConfiguration(final String redisUrl) {
         final CacheConfiguration cacheConfiguration = new CacheConfiguration(redisUrl);
         cacheConfiguration.createRedisConnectionFactory();
-        cacheConfiguration.createHashOperations();
-        cacheConfiguration.createStreamOperations();
         return cacheConfiguration;
-    }
-
-    private void registerGlobalConfigurationBean(ConfigurableBeanFactory beanFactory, GlobalConfiguration globalConfiguration) {
-        final String beanName = GlobalConfiguration.class.getSimpleName();
-        try {
-            beanFactory.isSingleton(beanName);
-            final DefaultListableBeanFactory factory = (DefaultListableBeanFactory) beanFactory;
-            factory.destroySingleton(beanName);
-            beanFactory.registerSingleton(beanName, globalConfiguration);
-        } catch (NoSuchBeanDefinitionException e) {
-            beanFactory.registerSingleton(beanName, globalConfiguration);
-        }
     }
 
     private void handleIIFEFunctions(final GlobalConfiguration globalConfiguration) {
@@ -122,9 +100,8 @@ public class Initializer implements SchedulingConfigurer {
     }
 
     private void executeIIFEFunctions(GlobalConfiguration globalConfiguration) {
-        // get hash and stream operation objects
-        final HashOperations<String, String, Map<String, Object>> hashOperations = globalConfiguration.getCacheConfiguration().getHashOperations();
-        final StreamOperations<String, Object, Object> streamOperations = globalConfiguration.getCacheConfiguration().getStreamOperations();
+        // get redis commands
+        final RedisCommands<String, String> redisCommands = globalConfiguration.getCacheConfiguration().getRedisCommands();
         // traverse configurations and execute functions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -147,7 +124,7 @@ public class Initializer implements SchedulingConfigurer {
                     try {
                         // create context
                         final String logLevel = getIIFELogLevel(globalConfig, iffeConfig, environmentConfig, tenantConfig, functionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
                         // create function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final ContextConsumer contextConsumer = getIIFEFunction(codeRepositoryUrl, functionConfiguration, query);
@@ -155,7 +132,7 @@ public class Initializer implements SchedulingConfigurer {
                         executorService.submit(() -> filterFunctionExecutor.execute(context, contextConsumer));
                     } catch (Exception e) {
                         final String logLevel = getIIFELogLevel(globalConfig, iffeConfig, environmentConfig, tenantConfig, functionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
                         context.getLogger().error("Error occurred while running IIFE function: %s - %s, error: %s", functionConfiguration.getName(), functionConfiguration.getVersion(), e.getMessage());
                     }
                 }
@@ -233,8 +210,7 @@ public class Initializer implements SchedulingConfigurer {
             final String environmentName,
             final String tenantId,
             final String logLevel,
-            final HashOperations<String, String, Map<String, Object>> hashOperations,
-            final StreamOperations<String, Object, Object> streamOperations
+            final RedisCommands<String, String> redisCommands
     ) {
         final HashMap<String, Object> attributes = new HashMap<>();
         attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), environmentName);
@@ -242,7 +218,7 @@ public class Initializer implements SchedulingConfigurer {
         if (nonNull(logLevel)) {
             attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), logLevel);
         }
-        assets.buildContext(attributes, hashOperations, streamOperations);
+        assets.buildContext(attributes, redisCommands);
         return (Context) attributes.get(Context.class.getSimpleName());
     }
 
@@ -262,9 +238,8 @@ public class Initializer implements SchedulingConfigurer {
     }
 
     private void executeStreamFunctions(final GlobalConfiguration globalConfiguration) {
-        // get hash and stream operation objects
-        final HashOperations<String, String, Map<String, Object>> hashOperations = globalConfiguration.getCacheConfiguration().getHashOperations();
-        final StreamOperations<String, Object, Object> streamOperations = globalConfiguration.getCacheConfiguration().getStreamOperations();
+        // get redis commands
+        final RedisCommands<String, String> redisCommands = globalConfiguration.getCacheConfiguration().getRedisCommands();
         // traverse configurations and create subscriptions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -287,17 +262,17 @@ public class Initializer implements SchedulingConfigurer {
                     try {
                         // create context
                         final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
                         // create consumer function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final StreamConsumer streamConsumer = getStreamConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
                         // start/register stream function subscription
                         final String topic = consumerConfiguration.getTopic();
-                        startStreamConsumerSubscription(environmentName, tenantId, topic, context, streamConsumer, globalConfiguration);
+                        startStreamConsumerSubscription(environmentName, tenantId, topic, context, streamConsumer, redisCommands);
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
                         context.getLogger().error("Error occurred while subscribing Stream function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
                     }
                 }
@@ -331,49 +306,24 @@ public class Initializer implements SchedulingConfigurer {
             final String topic,
             final Context context,
             final StreamConsumer streamConsumer,
-            final GlobalConfiguration globalConfiguration
+            final RedisCommands<String, String> redisCommands
     ) {
         final Logger logger = context.getLogger();
         // CREATE STREAM AND GROUP FOR ENV-TENANT-TOPIC
         final String environmentTenantTopicName = String.format("%s|%s-%s", environment, tenantId, topic); // default|default-key1
-        final StreamOperations<String, Object, Object> streamOperations = globalConfiguration.getCacheConfiguration().getStreamOperations();
-        try {
-            final String groupCreationResult = streamOperations.createGroup(environmentTenantTopicName, environmentTenantTopicName);
-            logger.debug("Group '%s' created under topic '%s' with result: %s ", environmentTenantTopicName, environmentTenantTopicName, groupCreationResult);
-        } catch (RedisSystemException e) {
-            if (e.getCause() instanceof RedisBusyException redisBusyException) {
-                logger.debug("Redis BUSY exception occurred while creating group '%s', error: %s", environmentTenantTopicName, redisBusyException.getMessage());
-            } else {
-                logger.error("Exception occurred while creating group '%s', error: '%s'", environmentTenantTopicName, e.getMessage());
+        final String environmentTenantGroup = String.format("%s|%s-%s", environment, tenantId, streamConsumer.getClass().getSimpleName()); // default|default-MyStreamConsumerFunction
+
+        final XReadArgs.StreamOffset<String> streamOffset = XReadArgs.StreamOffset.latest(environmentTenantTopicName);
+        final XGroupCreateArgs xGroupCreateArgs = XGroupCreateArgs.Builder.mkstream();
+        final String result = redisCommands.xgroupCreate(streamOffset, environmentTenantGroup, xGroupCreateArgs);
+        logger.debug("Group '%s' created under topic '%s' with result: %s ", environmentTenantGroup, environmentTenantTopicName, result);
+
+        executorService.execute(() -> {
+            while (nonNull(redisCommands.clientId())) {
+                final List<StreamMessage<String, String>> streamMessages = redisCommands.xread(XReadArgs.Builder.block(Duration.ofSeconds(5)), streamOffset);
+                streamMessages.forEach(message -> streamConsumer.consume(context, message.getId(), message.getBody()));
             }
-        }
-        // CREATE REDIS BEAN
-        final StreamListener<String, ObjectRecord<String, byte[]>> redisStreamListener =
-                message -> {
-                    final byte[] key = message.getId().getValue().getBytes(StandardCharsets.UTF_8);
-                    final byte[] value = message.getValue();
-                    filterFunctionExecutor.execute(context, streamConsumer, key, value);
-                };
-        final LettuceConnectionFactory redisConnectionFactory = globalConfiguration.getCacheConfiguration().getRedisConnectionFactory();
-        final Subscription subscription = redisStreamSubscription.createConsumerSubscription(
-                redisConnectionFactory,
-                redisStreamListener,
-                environmentTenantTopicName,
-                executorService
-        );
-        // CREATE BEAN
-        final String streamConsumerBeanName = String.format("%s-%s", environmentTenantTopicName, streamConsumer.hashCode()); // default|default-key1-00110011
-        try {
-            beanFactory.isSingleton(streamConsumerBeanName);
-            logger.debug("Stream consumer bean with id '%s' already exists, will remove the bean and register new bean.", streamConsumerBeanName);
-            final DefaultListableBeanFactory factory = (DefaultListableBeanFactory) beanFactory;
-            factory.destroySingleton(streamConsumerBeanName);
-            beanFactory.registerSingleton(streamConsumerBeanName, subscription);
-        } catch (NoSuchBeanDefinitionException e) {
-            beanFactory.registerSingleton(streamConsumerBeanName, subscription);
-        }
-        final Object streamConsumerBean = beanFactory.getBean(streamConsumerBeanName);
-        logger.debug("Stream consumer created with id '%s', bean: '%s'", streamConsumerBeanName, streamConsumerBean);
+        });
     }
 
     private void handleScheduledFunctions(GlobalConfiguration globalConfiguration) {
@@ -391,10 +341,13 @@ public class Initializer implements SchedulingConfigurer {
         return assets.getConfiguration(configurationHttpClient, url, ScheduledConfiguration.class);
     }
 
+    @SneakyThrows
     private void executeScheduledFunctions(final GlobalConfiguration globalConfiguration) {
-        // get hash and stream operation objects
-        final HashOperations<String, String, Map<String, Object>> hashOperations = globalConfiguration.getCacheConfiguration().getHashOperations();
-        final StreamOperations<String, Object, Object> streamOperations = globalConfiguration.getCacheConfiguration().getStreamOperations();
+        // create and start scheduler
+        final Scheduler scheduler = new StdScheduler(new FunctionScheduler(new QuartzSchedulerResources(), 10_000, 10_000));
+        scheduler.start();
+        // get redis commands
+        final RedisCommands<String, String> redisCommands = globalConfiguration.getCacheConfiguration().getRedisCommands();
         // traverse configurations and create schedules
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -417,16 +370,16 @@ public class Initializer implements SchedulingConfigurer {
                     try {
                         // create context
                         final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
                         // create consumer function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final ContextConsumer contextConsumer = getScheduledFunction(codeRepositoryUrl, scheduledFunctionConfiguration, query);
                         // schedule functions
-                        scheduleFunction(context, contextConsumer, scheduledFunctionConfiguration);
+                        scheduleFunction(scheduler, context, contextConsumer, scheduledFunctionConfiguration);
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashOperations, streamOperations);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
                         context.getLogger().error("Error occurred while scheduling scheduled function: %s - %s, error: %s", scheduledFunctionConfiguration.getName(), scheduledFunctionConfiguration.getVersion(), e.getMessage());
                     }
                 }
@@ -479,33 +432,37 @@ public class Initializer implements SchedulingConfigurer {
         return GlobalKeys.DEFAULT_LOG_LEVEL.getKey();
     }
 
+    @SneakyThrows
     private void scheduleFunction(
+            final Scheduler scheduler,
             final Context context,
             final ContextConsumer contextConsumer,
             final ScheduledConfiguration.FunctionConfiguration functionConfiguration
     ) {
         final Logger logger = context.getLogger();
-        final ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(10_000, threadFactory);
-        scheduledTaskRegistrar.setScheduler(executor);
         final String cron = functionConfiguration.getCron();
-        final String zone = functionConfiguration.getZone();
         final String scheduledFunctionName = contextConsumer.getClass().getName();
         if (nonNull(cron)) {
-            final TimeZone timeZone = Optional.ofNullable(zone)
-                    .map(TimeZone::getTimeZone)
-                    .orElse(TimeZone.getTimeZone(ZoneOffset.UTC));
-            final CronTrigger cronTrigger = new CronTrigger(cron, timeZone);
-            final CronTask cronTask = new CronTask(() -> filterFunctionExecutor.execute(context, contextConsumer), cronTrigger);
-            scheduledTaskRegistrar.scheduleCronTask(cronTask);
-            logger.debug("Scheduled function '%s' with cron '%s' and time zone '%s'", scheduledFunctionName, cron, timeZone.getDisplayName());
+            final Map<Object, Object> objectMap = Map.of(
+                    FilterFunctionExecutor.class.getSimpleName(), filterFunctionExecutor,
+                    Context.class.getSimpleName(), context,
+                    ContextConsumer.class.getSimpleName(), contextConsumer
+            );
+            final JobDetail jobDetail = JobBuilder.newJob(FunctionJob.class)
+                    .withIdentity(scheduledFunctionName, scheduledFunctionName)
+                    .setJobData(new JobDataMap(objectMap))
+                    .build();
+            final Trigger trigger = TriggerBuilder.newTrigger()
+                    .withIdentity(scheduledFunctionName, scheduledFunctionName)
+                    .forJob(jobDetail)
+                    .withSchedule(CronScheduleBuilder.cronSchedule(cron))
+                    .build();
+            scheduler.scheduleJob(jobDetail, trigger);
+            logger.debug("Scheduled function '%s' with cron '%s'", scheduledFunctionName, cron);
         } else {
             logger.error("Cron is not set for scheduled function '%s', will not schedule it.", scheduledFunctionName);
         }
-    }
 
-    @Override
-    public void configureTasks(final ScheduledTaskRegistrar taskRegistrar) {
-        this.scheduledTaskRegistrar = taskRegistrar;
     }
 
 }

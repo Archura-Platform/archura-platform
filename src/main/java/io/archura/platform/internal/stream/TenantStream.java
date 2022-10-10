@@ -1,33 +1,26 @@
 package io.archura.platform.internal.stream;
 
 import io.archura.platform.api.stream.LightStream;
+import io.lettuce.core.api.sync.RedisCommands;
 import jdk.internal.reflect.Reflection;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.connection.stream.ObjectRecord;
-import org.springframework.data.redis.connection.stream.RecordId;
-import org.springframework.data.redis.connection.stream.StreamRecords;
-import org.springframework.data.redis.core.StreamOperations;
 
-import java.util.Optional;
+import java.util.Map;
 import java.util.Set;
 
 @RequiredArgsConstructor
 public class TenantStream implements LightStream {
 
     static {
-        Reflection.registerFieldsToFilter(TenantStream.class, Set.of("tenantKey", "streamOperations"));
+        Reflection.registerFieldsToFilter(TenantStream.class, Set.of("tenantKey", "redisCommands"));
     }
 
     private final String tenantKey;
-    private final StreamOperations<String, Object, Object> streamOperations;
+    private final RedisCommands<String, String> redisCommands;
 
-    public Optional<String> send(final String topicName, final byte[] value) {
+    public String send(final String topicName, final Map<String, String> message) {
         final String streamKey = String.format("%s-%s", tenantKey, topicName);
-        final ObjectRecord<String, byte[]> streamRecord = StreamRecords.newRecord()
-                .ofObject(value)
-                .withStreamKey(streamKey);
-        final RecordId recordId = streamOperations.add(streamRecord);
-        return Optional.ofNullable(recordId).map(RecordId::getValue);
+        return redisCommands.xadd(streamKey, message);
     }
 
 }

@@ -31,7 +31,6 @@ public class ScheduledConfiguration {
         private String name;
         private String version;
         private String cron;
-        private String zone;
         private String logLevel;
         private JsonNode config;
     }
