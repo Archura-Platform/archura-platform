@@ -395,7 +395,7 @@ public class Initializer {
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final ContextConsumer contextConsumer = getScheduledFunction(codeRepositoryUrl, scheduledFunctionConfiguration, query);
                         // schedule functions
-                        Thread.ofVirtual().start(() -> scheduleFunction(context, contextConsumer, scheduledFunctionConfiguration, threadFactory));
+                        scheduleFunction(context, contextConsumer, scheduledFunctionConfiguration, threadFactory);
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
