@@ -321,7 +321,7 @@ public class Initializer {
         executorService.execute(() -> {
             while (nonNull(redisCommands.clientId())) {
                 final List<StreamMessage<String, String>> streamMessages = redisCommands.xread(XReadArgs.Builder.block(Duration.ofSeconds(5)), streamOffset);
-                streamMessages.forEach(message -> streamConsumer.consume(context, message.getId(), message.getBody()));
+                streamMessages.forEach(message -> filterFunctionExecutor.execute(context, streamConsumer, message.getId(), message.getBody()));
             }
         });
     }

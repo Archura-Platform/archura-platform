@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.Assets;
 import io.archura.platform.internal.Initializer;
-import io.archura.platform.internal.RequestFilter;
 import io.archura.platform.internal.RequestHandler;
 import lombok.RequiredArgsConstructor;
 
@@ -17,42 +16,44 @@ import java.util.concurrent.ThreadFactory;
 @RequiredArgsConstructor
 public class ApplicationConfiguration {
 
-    private final String configRepositoryUrl;
-    private final HttpClient defaultHttpClient = buildDefaultHttpClient();
-    private final HttpClient configurationHttpClient = buildConfigurationHttpClient();
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private final ThreadFactory threadFactory = getThreadFactory();
-
-    public RequestFilter requestInterceptor() {
-        return new RequestFilter();
-    }
-
-    public ApplicationRunner prepareConfigurations(final Initializer initializer) {
-        return args -> initializer.initialize();
-    }
-
-    public ExecutorService getExecutorService() {
-        return Executors.newCachedThreadPool(threadFactory);
-    }
-
-    private ThreadFactory getThreadFactory() {
+    public ThreadFactory threadFactory() {
         return Thread.ofVirtual().name("VIRTUAL-THREAD").factory();
     }
 
+    public ExecutorService executorService(ThreadFactory threadFactory) {
+        return Executors.newCachedThreadPool(threadFactory);
+    }
+
+    public FilterFunctionExecutor filterFunctionExecutor() {
+        return new FilterFunctionExecutor();
+    }
+
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper();
+    }
+
+    public HttpClient httpClient() {
+        return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    }
+
     public Assets assets(
+            final ObjectMapper objectMapper,
+            final HttpClient httpClient,
             final FilterFunctionExecutor filterFunctionExecutor
     ) {
-        return new Assets(objectMapper, defaultHttpClient, filterFunctionExecutor);
+        return new Assets(objectMapper, httpClient, filterFunctionExecutor);
     }
 
     public Initializer initializer(
-            final FilterFunctionExecutor filterFunctionExecutor,
+            final String configRepositoryUrl,
+            final HttpClient httpClient,
             final ExecutorService executorService,
-            final Assets assets
+            final Assets assets,
+            final FilterFunctionExecutor filterFunctionExecutor
     ) {
         return new Initializer(
                 configRepositoryUrl,
-                configurationHttpClient,
+                httpClient,
                 executorService,
                 assets,
                 filterFunctionExecutor
@@ -60,26 +61,12 @@ public class ApplicationConfiguration {
     }
 
     public RequestHandler requestHandler(
+            final String configRepositoryUrl,
+            final HttpClient httpClient,
             final Assets assets,
-            final ConfigurableBeanFactory beanFactory,
-            final FilterFunctionExecutor filterFunctionExecutor,
-            @Qualifier("VirtualExecutorService") final ExecutorService executorService
+            final FilterFunctionExecutor filterFunctionExecutor
     ) {
-        return new RequestHandler(configRepositoryUrl, defaultHttpClient, assets, beanFactory, filterFunctionExecutor);
-    }
-
-    public RouterFunction<ServerResponse> routes(final RequestHandler requestHandler) {
-        return RouterFunctions.route()
-                .route(RequestPredicates.all(), requestHandler::handle)
-                .build();
-    }
-
-    private HttpClient buildDefaultHttpClient() {
-        return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-    }
-
-    private HttpClient buildConfigurationHttpClient() {
-        return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        return new RequestHandler(configRepositoryUrl, httpClient, assets, filterFunctionExecutor);
     }
 
 }

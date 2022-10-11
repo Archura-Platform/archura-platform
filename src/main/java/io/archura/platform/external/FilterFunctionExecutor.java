@@ -1,23 +1,21 @@
 package io.archura.platform.external;
 
 import io.archura.platform.api.context.Context;
+import io.archura.platform.api.http.HttpRequest;
+import io.archura.platform.api.http.HttpResponse;
 import io.archura.platform.api.type.Configurable;
 import io.archura.platform.api.type.functionalcore.ContextConsumer;
+import io.archura.platform.api.type.functionalcore.HandlerFunction;
 import io.archura.platform.api.type.functionalcore.StreamConsumer;
-import org.springframework.stereotype.Component;
-import org.springframework.web.servlet.function.HandlerFunction;
-import org.springframework.web.servlet.function.ServerRequest;
-import org.springframework.web.servlet.function.ServerResponse;
 
 import java.util.Collections;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.UnaryOperator;
 
-@Component
 public class FilterFunctionExecutor {
 
-    public void execute(Context context, StreamConsumer streamConsumer, byte[] key, byte[] value) {
+    public void execute(Context context, StreamConsumer streamConsumer, String key, Map<String, String> value) {
         streamConsumer.consume(context, key, value);
     }
 
@@ -25,15 +23,15 @@ public class FilterFunctionExecutor {
         contextConsumer.accept(context);
     }
 
-    public ServerRequest execute(ServerRequest request, UnaryOperator<ServerRequest> preFilter) {
+    public HttpRequest execute(HttpRequest request, UnaryOperator<HttpRequest> preFilter) {
         return preFilter.apply(request);
     }
 
-    public ServerResponse execute(ServerRequest request, HandlerFunction<ServerResponse> tenantFunction) throws Exception {
+    public HttpResponse execute(HttpRequest request, HandlerFunction<HttpResponse> tenantFunction) {
         return tenantFunction.handle(request);
     }
 
-    public ServerResponse execute(ServerRequest request, ServerResponse response, BiFunction<ServerRequest, ServerResponse, ServerResponse> postFilter) {
+    public HttpResponse execute(HttpRequest request, HttpResponse response, BiFunction<HttpRequest, HttpResponse, HttpResponse> postFilter) {
         return postFilter.apply(request, response);
     }
 

@@ -34,7 +34,9 @@ public class GlobalConfiguration {
     public static class GlobalConfig extends Configuration {
         private String redisUrl;
         private String codeRepositoryUrl;
-        private String archuraPlatformToken;
+        private String hostname = "0.0.0.0";
+        private int port = 8080;
+        private int backlog = 500;
     }
 
     @Data
