@@ -17,24 +17,29 @@ import io.archura.platform.internal.configuration.ScheduledConfiguration;
 import io.archura.platform.internal.configuration.StreamConfiguration;
 import io.archura.platform.internal.schedule.FunctionJob;
 import io.archura.platform.internal.schedule.FunctionScheduler;
+import io.lettuce.core.Consumer;
+import io.lettuce.core.RedisBusyException;
 import io.lettuce.core.StreamMessage;
 import io.lettuce.core.XGroupCreateArgs;
 import io.lettuce.core.XReadArgs;
 import io.lettuce.core.api.sync.RedisCommands;
 import lombok.RequiredArgsConstructor;
-import lombok.SneakyThrows;
 import org.quartz.CronScheduleBuilder;
 import org.quartz.JobBuilder;
 import org.quartz.JobDataMap;
 import org.quartz.JobDetail;
 import org.quartz.Scheduler;
+import org.quartz.SchedulerException;
 import org.quartz.Trigger;
 import org.quartz.TriggerBuilder;
 import org.quartz.core.QuartzSchedulerResources;
 import org.quartz.impl.StdScheduler;
+import org.quartz.simpl.RAMJobStore;
+import org.quartz.spi.ThreadExecutor;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -311,17 +316,40 @@ public class Initializer {
         final Logger logger = context.getLogger();
         // CREATE STREAM AND GROUP FOR ENV-TENANT-TOPIC
         final String environmentTenantTopicName = String.format("%s|%s-%s", environment, tenantId, topic); // default|default-key1
-        final String environmentTenantGroup = String.format("%s|%s-%s", environment, tenantId, streamConsumer.getClass().getSimpleName()); // default|default-MyStreamConsumerFunction
 
-        final XReadArgs.StreamOffset<String> streamOffset = XReadArgs.StreamOffset.latest(environmentTenantTopicName);
+//        final XReadArgs.StreamOffset<String> streamOffset = XReadArgs.StreamOffset.latest(environmentTenantTopicName);
+        final XReadArgs.StreamOffset<String> streamOffset = XReadArgs.StreamOffset.from(environmentTenantTopicName, "0-0");
         final XGroupCreateArgs xGroupCreateArgs = XGroupCreateArgs.Builder.mkstream();
-        final String result = redisCommands.xgroupCreate(streamOffset, environmentTenantGroup, xGroupCreateArgs);
-        logger.debug("Group '%s' created under topic '%s' with result: %s ", environmentTenantGroup, environmentTenantTopicName, result);
-
+        try {
+            //final String result = redisCommands.xgroupCreate(streamOffset, environmentTenantTopicName, xGroupCreateArgs);
+            final String result = redisCommands.xgroupCreate(streamOffset, environmentTenantTopicName, xGroupCreateArgs);
+            logger.debug("Group '%s' created under topic '%s' with result: %s ", environmentTenantTopicName, environmentTenantTopicName, result);
+        } catch (RedisBusyException exception) {
+            logger.debug("Group '%s' already exists for topic '%s', message: %s", environmentTenantTopicName, environmentTenantTopicName, exception.getMessage());
+        }
         executorService.execute(() -> {
             while (nonNull(redisCommands.clientId())) {
-                final List<StreamMessage<String, String>> streamMessages = redisCommands.xread(XReadArgs.Builder.block(Duration.ofSeconds(5)), streamOffset);
-                streamMessages.forEach(message -> filterFunctionExecutor.execute(context, streamConsumer, message.getId(), message.getBody()));
+                try {
+                    Thread.sleep(Duration.ofMillis(1000));
+                    List<StreamMessage<String, String>> streamMessages = redisCommands.xreadgroup(
+                            Consumer.from(environmentTenantTopicName, environmentTenantTopicName),
+                            XReadArgs.StreamOffset.lastConsumed(environmentTenantTopicName)
+                    );
+                    if (nonNull(streamMessages) && !streamMessages.isEmpty()) {
+                        logger.debug("Redis stream messages: '%s'", streamMessages);
+                        streamMessages.forEach(message -> {
+                            try {
+                                filterFunctionExecutor.execute(context, streamConsumer, message.getId(), message.getBody());
+                                redisCommands.xack(environmentTenantTopicName, environmentTenantTopicName, message.getId());
+                                logger.info("Stream message acknowledged, id: '%s'", message.getId());
+                            } catch (Exception exception) {
+                                logger.error("Could not consume message: '%s'", message);
+                            }
+                        });
+                    }
+                } catch (RuntimeException | InterruptedException e) {
+                    logger.error("Could not get message from stream: '%s', error: '%s'", environmentTenantTopicName, e.getMessage());
+                }
             }
         });
     }
@@ -329,7 +357,12 @@ public class Initializer {
     private void handleScheduledFunctions(GlobalConfiguration globalConfiguration) {
         final ScheduledConfiguration scheduledConfiguration = createScheduledConfiguration();
         globalConfiguration.setScheduledConfiguration(scheduledConfiguration);
-        executeScheduledFunctions(globalConfiguration);
+        try {
+            executeScheduledFunctions(globalConfiguration);
+        } catch (SchedulerException exception) {
+            final Logger logger = assets.getLogger(Collections.emptyMap());
+            logger.error("Could not schedule function, error: '%s'", exception.getMessage());
+        }
     }
 
     private ScheduledConfiguration createScheduledConfiguration() {
@@ -341,10 +374,22 @@ public class Initializer {
         return assets.getConfiguration(configurationHttpClient, url, ScheduledConfiguration.class);
     }
 
-    @SneakyThrows
-    private void executeScheduledFunctions(final GlobalConfiguration globalConfiguration) {
+    private void executeScheduledFunctions(final GlobalConfiguration globalConfiguration) throws SchedulerException {
         // create and start scheduler
-        final Scheduler scheduler = new StdScheduler(new FunctionScheduler(new QuartzSchedulerResources(), 10_000, 10_000));
+        final QuartzSchedulerResources quartzSchedulerResources = new QuartzSchedulerResources();
+        quartzSchedulerResources.setName("ScheduledFunctions");
+        quartzSchedulerResources.setJobStore(new RAMJobStore());
+        quartzSchedulerResources.setThreadExecutor(new ThreadExecutor() {
+            @Override
+            public void execute(Thread thread) {
+                executorService.execute(thread);
+            }
+
+            @Override
+            public void initialize() {
+            }
+        });
+        final Scheduler scheduler = new StdScheduler(new FunctionScheduler(quartzSchedulerResources, 10_000, 10_000));
         scheduler.start();
         // get redis commands
         final RedisCommands<String, String> redisCommands = globalConfiguration.getCacheConfiguration().getRedisCommands();
@@ -432,13 +477,12 @@ public class Initializer {
         return GlobalKeys.DEFAULT_LOG_LEVEL.getKey();
     }
 
-    @SneakyThrows
     private void scheduleFunction(
             final Scheduler scheduler,
             final Context context,
             final ContextConsumer contextConsumer,
             final ScheduledConfiguration.FunctionConfiguration functionConfiguration
-    ) {
+    ) throws SchedulerException {
         final Logger logger = context.getLogger();
         final String cron = functionConfiguration.getCron();
         final String scheduledFunctionName = contextConsumer.getClass().getName();

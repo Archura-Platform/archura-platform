@@ -22,5 +22,4 @@ public class TenantStream implements LightStream {
         final String streamKey = String.format("%s-%s", tenantKey, topicName);
         return redisCommands.xadd(streamKey, message);
     }
-
 }

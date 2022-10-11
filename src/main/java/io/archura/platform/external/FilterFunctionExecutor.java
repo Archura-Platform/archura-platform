@@ -1,8 +1,8 @@
 package io.archura.platform.external;
 
 import io.archura.platform.api.context.Context;
-import io.archura.platform.api.http.HttpRequest;
-import io.archura.platform.api.http.HttpResponse;
+import io.archura.platform.api.http.HttpServerRequest;
+import io.archura.platform.api.http.HttpServerResponse;
 import io.archura.platform.api.type.Configurable;
 import io.archura.platform.api.type.functionalcore.ContextConsumer;
 import io.archura.platform.api.type.functionalcore.HandlerFunction;
@@ -23,15 +23,15 @@ public class FilterFunctionExecutor {
         contextConsumer.accept(context);
     }
 
-    public HttpRequest execute(HttpRequest request, UnaryOperator<HttpRequest> preFilter) {
+    public HttpServerRequest execute(HttpServerRequest request, UnaryOperator<HttpServerRequest> preFilter) {
         return preFilter.apply(request);
     }
 
-    public HttpResponse execute(HttpRequest request, HandlerFunction<HttpResponse> tenantFunction) {
+    public HttpServerResponse execute(HttpServerRequest request, HandlerFunction<HttpServerResponse> tenantFunction) {
         return tenantFunction.handle(request);
     }
 
-    public HttpResponse execute(HttpRequest request, HttpResponse response, BiFunction<HttpRequest, HttpResponse, HttpResponse> postFilter) {
+    public HttpServerResponse execute(HttpServerRequest request, HttpServerResponse response, BiFunction<HttpServerRequest, HttpServerResponse, HttpServerResponse> postFilter) {
         return postFilter.apply(request, response);
     }
 

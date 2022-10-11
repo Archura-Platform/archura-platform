@@ -2,6 +2,8 @@ package io.archura.platform;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import io.archura.platform.api.http.HttpServerResponse;
+import io.archura.platform.api.http.HttpStatusCode;
 import io.archura.platform.api.logger.Logger;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.Assets;
@@ -9,9 +11,7 @@ import io.archura.platform.internal.Initializer;
 import io.archura.platform.internal.RequestHandler;
 import io.archura.platform.internal.configuration.ApplicationConfiguration;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
-import io.archura.platform.internal.http.HttpRequestData;
-import io.archura.platform.internal.http.HttpResponseData;
-import io.archura.platform.internal.http.HttpStatusCode;
+import io.archura.platform.internal.http.HttpServerRequestData;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -32,7 +32,7 @@ public class ArchuraPlatformApplication {
     }
 
     private void start() throws IOException {
-        final String configRepositoryUrl = Optional.ofNullable(System.getenv("CONFIG_REPOSITORY_URL")).orElse("http://config-service/");
+        final String configRepositoryUrl = Optional.ofNullable(System.getenv("CONFIG_REPOSITORY_URL")).orElse("http://config-service");
         final ApplicationConfiguration applicationConfiguration = new ApplicationConfiguration();
         final ThreadFactory threadFactory = applicationConfiguration.threadFactory();
         final ExecutorService executorService = applicationConfiguration.executorService(threadFactory);
@@ -62,16 +62,16 @@ public class ArchuraPlatformApplication {
                         .entrySet()
                         .stream()
                         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-                final HttpRequestData httpRequest = new HttpRequestData(
+                final HttpServerRequestData httpRequest = new HttpServerRequestData(
                         exchange.getRequestURI(),
                         exchange.getRequestMethod(),
                         headers,
                         exchange.getRequestBody(),
                         exchange.getHttpContext().getAttributes()
                 );
-                final HttpResponseData response = (HttpResponseData) requestHandler.handle(httpRequest);
-                exchange.getResponseHeaders().putAll(response.getResponseHeaders());
-                exchange.sendResponseHeaders(response.getStatusCode(), response.getBytes().length);
+                final HttpServerResponse response = requestHandler.handle(httpRequest);
+                exchange.getResponseHeaders().putAll(response.getHeaders());
+                exchange.sendResponseHeaders(response.getStatus(), response.getBytes().length);
                 exchange.getResponseBody().write(response.getBytes());
                 exchange.getResponseBody().close();
             } catch (Throwable throwable) {

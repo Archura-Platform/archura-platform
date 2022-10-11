@@ -1,6 +1,6 @@
 package io.archura.platform.internal.http;
 
-import io.archura.platform.api.http.HttpRequest;
+import io.archura.platform.api.http.HttpServerRequest;
 import io.archura.platform.internal.http.exception.RequestReadException;
 
 import java.io.IOException;
@@ -9,7 +9,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
-public class HttpRequestData implements HttpRequest {
+public class HttpServerRequestData implements HttpServerRequest {
 
     private final URI requestURI;
     private final String requestMethod;
@@ -17,7 +17,7 @@ public class HttpRequestData implements HttpRequest {
     private final InputStream requestBody;
     private final Map<String, Object> attributes;
 
-    public HttpRequestData(
+    public HttpServerRequestData(
             final URI requestURI,
             final String requestMethod,
             final Map<String, List<String>> headers,
