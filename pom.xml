@@ -19,7 +19,6 @@
         <archura-platform-api.version>0.0.4</archura-platform-api.version>
         <jackson-databind.version>2.13.4</jackson-databind.version>
         <lettuce-core.version>6.2.1.RELEASE</lettuce-core.version>
-        <quartz.version>2.3.2</quartz.version>
     </properties>
     <dependencies>
         <dependency>
@@ -36,11 +35,6 @@
             <groupId>io.lettuce</groupId>
             <artifactId>lettuce-core</artifactId>
             <version>${lettuce-core.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.quartz-scheduler</groupId>
-            <artifactId>quartz</artifactId>
-            <version>${quartz.version}</version>
         </dependency>
 
         <!-- Provided -->

@@ -47,6 +47,7 @@ public class ApplicationConfiguration {
     public Initializer initializer(
             final String configRepositoryUrl,
             final HttpClient httpClient,
+            final ThreadFactory threadFactory,
             final ExecutorService executorService,
             final Assets assets,
             final FilterFunctionExecutor filterFunctionExecutor
@@ -54,6 +55,7 @@ public class ApplicationConfiguration {
         return new Initializer(
                 configRepositoryUrl,
                 httpClient,
+                threadFactory,
                 executorService,
                 assets,
                 filterFunctionExecutor

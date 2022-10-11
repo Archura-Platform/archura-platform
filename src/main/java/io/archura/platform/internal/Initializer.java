@@ -15,8 +15,6 @@ import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.configuration.IIFEConfiguration;
 import io.archura.platform.internal.configuration.ScheduledConfiguration;
 import io.archura.platform.internal.configuration.StreamConfiguration;
-import io.archura.platform.internal.schedule.FunctionJob;
-import io.archura.platform.internal.schedule.FunctionScheduler;
 import io.lettuce.core.Consumer;
 import io.lettuce.core.RedisBusyException;
 import io.lettuce.core.StreamMessage;
@@ -24,18 +22,6 @@ import io.lettuce.core.XGroupCreateArgs;
 import io.lettuce.core.XReadArgs;
 import io.lettuce.core.api.sync.RedisCommands;
 import lombok.RequiredArgsConstructor;
-import org.quartz.CronScheduleBuilder;
-import org.quartz.JobBuilder;
-import org.quartz.JobDataMap;
-import org.quartz.JobDetail;
-import org.quartz.Scheduler;
-import org.quartz.SchedulerException;
-import org.quartz.Trigger;
-import org.quartz.TriggerBuilder;
-import org.quartz.core.QuartzSchedulerResources;
-import org.quartz.impl.StdScheduler;
-import org.quartz.simpl.RAMJobStore;
-import org.quartz.spi.ThreadExecutor;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -44,6 +30,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 
 import static java.util.Objects.nonNull;
 
@@ -52,6 +42,7 @@ public class Initializer {
 
     private final String configRepositoryUrl;
     private final HttpClient configurationHttpClient;
+    private final ThreadFactory threadFactory;
     private final ExecutorService executorService;
     private final Assets assets;
     private final FilterFunctionExecutor filterFunctionExecutor;
@@ -359,7 +350,7 @@ public class Initializer {
         globalConfiguration.setScheduledConfiguration(scheduledConfiguration);
         try {
             executeScheduledFunctions(globalConfiguration);
-        } catch (SchedulerException exception) {
+        } catch (Exception exception) {
             final Logger logger = assets.getLogger(Collections.emptyMap());
             logger.error("Could not schedule function, error: '%s'", exception.getMessage());
         }
@@ -374,23 +365,7 @@ public class Initializer {
         return assets.getConfiguration(configurationHttpClient, url, ScheduledConfiguration.class);
     }
 
-    private void executeScheduledFunctions(final GlobalConfiguration globalConfiguration) throws SchedulerException {
-        // create and start scheduler
-        final QuartzSchedulerResources quartzSchedulerResources = new QuartzSchedulerResources();
-        quartzSchedulerResources.setName("ScheduledFunctions");
-        quartzSchedulerResources.setJobStore(new RAMJobStore());
-        quartzSchedulerResources.setThreadExecutor(new ThreadExecutor() {
-            @Override
-            public void execute(Thread thread) {
-                executorService.execute(thread);
-            }
-
-            @Override
-            public void initialize() {
-            }
-        });
-        final Scheduler scheduler = new StdScheduler(new FunctionScheduler(quartzSchedulerResources, 10_000, 10_000));
-        scheduler.start();
+    private void executeScheduledFunctions(final GlobalConfiguration globalConfiguration) {
         // get redis commands
         final RedisCommands<String, String> redisCommands = globalConfiguration.getCacheConfiguration().getRedisCommands();
         // traverse configurations and create schedules
@@ -420,7 +395,7 @@ public class Initializer {
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final ContextConsumer contextConsumer = getScheduledFunction(codeRepositoryUrl, scheduledFunctionConfiguration, query);
                         // schedule functions
-                        scheduleFunction(scheduler, context, contextConsumer, scheduledFunctionConfiguration);
+                        Thread.ofVirtual().start(() -> scheduleFunction(context, contextConsumer, scheduledFunctionConfiguration, threadFactory));
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
@@ -478,33 +453,26 @@ public class Initializer {
     }
 
     private void scheduleFunction(
-            final Scheduler scheduler,
             final Context context,
             final ContextConsumer contextConsumer,
-            final ScheduledConfiguration.FunctionConfiguration functionConfiguration
-    ) throws SchedulerException {
+            final ScheduledConfiguration.FunctionConfiguration functionConfiguration,
+            final ThreadFactory threadFactory
+    ) {
         final Logger logger = context.getLogger();
-        final String cron = functionConfiguration.getCron();
+        final long delay = functionConfiguration.getDelay();
+        final String timeUnitValue = functionConfiguration.getTimeUnit();
+        final TimeUnit timeUnit = TimeUnit.valueOf(timeUnitValue);
         final String scheduledFunctionName = contextConsumer.getClass().getName();
-        if (nonNull(cron)) {
-            final Map<Object, Object> objectMap = Map.of(
-                    FilterFunctionExecutor.class.getSimpleName(), filterFunctionExecutor,
-                    Context.class.getSimpleName(), context,
-                    ContextConsumer.class.getSimpleName(), contextConsumer
-            );
-            final JobDetail jobDetail = JobBuilder.newJob(FunctionJob.class)
-                    .withIdentity(scheduledFunctionName, scheduledFunctionName)
-                    .setJobData(new JobDataMap(objectMap))
-                    .build();
-            final Trigger trigger = TriggerBuilder.newTrigger()
-                    .withIdentity(scheduledFunctionName, scheduledFunctionName)
-                    .forJob(jobDetail)
-                    .withSchedule(CronScheduleBuilder.cronSchedule(cron))
-                    .build();
-            scheduler.scheduleJob(jobDetail, trigger);
-            logger.debug("Scheduled function '%s' with cron '%s'", scheduledFunctionName, cron);
+        if (delay > 0) {
+            try {
+                final ScheduledExecutorService scheduledExecutorService = Executors.newScheduledThreadPool(1_000, threadFactory);
+                scheduledExecutorService.scheduleWithFixedDelay(() -> filterFunctionExecutor.execute(context, contextConsumer), 1, delay, timeUnit);
+                logger.debug("Scheduled function '%s' with delay: '%s' and timeUnit: '%s'", scheduledFunctionName, delay, timeUnit);
+            } catch (Exception exception) {
+                logger.error("Got exception while scheduling function '%s', error: %s.", scheduledFunctionName, exception.getMessage());
+            }
         } else {
-            logger.error("Cron is not set for scheduled function '%s', will not schedule it.", scheduledFunctionName);
+            logger.error("Delay cannot be zero or less for scheduled function '%s', will not schedule it.", scheduledFunctionName);
         }
 
     }

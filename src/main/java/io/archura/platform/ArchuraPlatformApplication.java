@@ -40,7 +40,7 @@ public class ArchuraPlatformApplication {
         final HttpClient httpClient = applicationConfiguration.httpClient();
         final FilterFunctionExecutor filterFunctionExecutor = applicationConfiguration.filterFunctionExecutor();
         final Assets assets = applicationConfiguration.assets(objectMapper, httpClient, filterFunctionExecutor);
-        final Initializer initializer = applicationConfiguration.initializer(configRepositoryUrl, httpClient, executorService, assets, filterFunctionExecutor);
+        final Initializer initializer = applicationConfiguration.initializer(configRepositoryUrl, httpClient, threadFactory, executorService, assets, filterFunctionExecutor);
         final RequestHandler requestHandler = applicationConfiguration.requestHandler(configRepositoryUrl, httpClient, assets, filterFunctionExecutor);
         initializer.initialize();
 

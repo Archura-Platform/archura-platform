@@ -30,7 +30,8 @@ public class ScheduledConfiguration {
     public static class FunctionConfiguration {
         private String name;
         private String version;
-        private String cron;
+        private long delay;
+        private String timeUnit;
         private String logLevel;
         private JsonNode config;
     }
