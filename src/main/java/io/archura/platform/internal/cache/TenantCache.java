@@ -1,7 +1,6 @@
 package io.archura.platform.internal.cache;
 
 import io.archura.platform.api.cache.Cache;
-import io.lettuce.core.api.sync.RedisCommands;
 import jdk.internal.reflect.Reflection;
 
 import java.util.List;
@@ -10,49 +9,49 @@ import java.util.Set;
 public class TenantCache implements Cache {
 
     static {
-        Reflection.registerFieldsToFilter(TenantCache.class, Set.of("tenantKey", "redisCommands"));
+        Reflection.registerFieldsToFilter(TenantCache.class, Set.of("tenantKey", "hashCache"));
     }
 
     private final String tenantKey;
-    private final RedisCommands<String, String> redisCommands;
+    private final HashCache<String, String> hashCache;
 
-    public TenantCache(final String tenantKey, final RedisCommands<String, String> redisCommands) {
+    public TenantCache(final String tenantKey, final HashCache<String, String> hashCache) {
         this.tenantKey = tenantKey;
-        this.redisCommands = redisCommands;
+        this.hashCache = hashCache;
     }
 
     @Override
     public boolean set(String key, String value) {
-        return redisCommands.hset(tenantKey, key, value);
+        return hashCache.set(tenantKey, key, value);
     }
 
     @Override
     public String get(String key) {
-        return redisCommands.hget(tenantKey, key);
+        return hashCache.get(tenantKey, key);
     }
 
     @Override
     public long del(String... keys) {
-        return redisCommands.hdel(tenantKey, keys);
+        return hashCache.del(tenantKey, keys);
     }
 
     @Override
     public boolean exists(String key) {
-        return redisCommands.hexists(tenantKey, key);
+        return hashCache.exists(tenantKey, key);
     }
 
     @Override
     public List<String> keys() {
-        return redisCommands.hkeys(tenantKey);
+        return hashCache.keys(tenantKey);
     }
 
     @Override
     public List<String> values() {
-        return redisCommands.hvals(tenantKey);
+        return hashCache.vals(tenantKey);
     }
 
     @Override
     public long length() {
-        return redisCommands.hlen(tenantKey);
+        return hashCache.len(tenantKey);
     }
 }

@@ -12,11 +12,12 @@ import io.archura.platform.api.logger.Logger;
 import io.archura.platform.api.stream.LightStream;
 import io.archura.platform.api.type.Configurable;
 import io.archura.platform.external.FilterFunctionExecutor;
+import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.cache.TenantCache;
 import io.archura.platform.internal.context.RequestContext;
 import io.archura.platform.internal.logging.LoggerFactory;
+import io.archura.platform.internal.stream.CacheStream;
 import io.archura.platform.internal.stream.TenantStream;
-import io.lettuce.core.api.sync.RedisCommands;
 import lombok.RequiredArgsConstructor;
 
 import java.io.IOException;
@@ -87,11 +88,11 @@ public class Assets {
 
     public void buildContext(
             final Map<String, Object> attributes,
-            final RedisCommands<String, String> redisCommands
-    ) {
+            final HashCache<String, String> hashCache,
+            final CacheStream<String, Map<String, String>> cacheStream) {
         final RequestContext context = RequestContext.builder()
-                .cache(getTenantCache(attributes, redisCommands))
-                .lightStream(getTenantStream(attributes, redisCommands))
+                .cache(getTenantCache(attributes, hashCache))
+                .lightStream(getTenantStream(attributes, cacheStream))
                 .logger(getLogger(attributes))
                 .httpClient(getHttpClient(attributes))
                 .objectMapper(getObjectMapper(attributes))
@@ -99,12 +100,12 @@ public class Assets {
         attributes.put(Context.class.getSimpleName(), context);
     }
 
-    private Optional<Cache> getTenantCache(final Map<String, Object> attributes, final RedisCommands<String, String> redisCommands) {
+    private Optional<Cache> getTenantCache(final Map<String, Object> attributes, final HashCache<String, String> hashCache) {
         if (attributes.containsKey(GlobalKeys.REQUEST_ENVIRONMENT.getKey())
                 && attributes.containsKey(EnvironmentKeys.REQUEST_TENANT_ID.getKey())) {
             final String environmentTenantIdKey = getEnvironmentTenantKey(attributes);
             if (isNull(tenantCacheMap.get(environmentTenantIdKey))) {
-                final TenantCache tenantCache = new TenantCache(environmentTenantIdKey, redisCommands);
+                final TenantCache tenantCache = new TenantCache(environmentTenantIdKey, hashCache);
                 tenantCacheMap.put(environmentTenantIdKey, tenantCache);
             }
             return Optional.of(tenantCacheMap.get(environmentTenantIdKey));
@@ -115,13 +116,13 @@ public class Assets {
 
     private Optional<LightStream> getTenantStream(
             final Map<String, Object> attributes,
-            final RedisCommands<String, String> redisCommands
+            final CacheStream<String, Map<String, String>> cacheStream
     ) {
         if (attributes.containsKey(GlobalKeys.REQUEST_ENVIRONMENT.getKey())
                 && attributes.containsKey(EnvironmentKeys.REQUEST_TENANT_ID.getKey())) {
             final String environmentTenantIdKey = getEnvironmentTenantKey(attributes);
             if (isNull(tenantStreamMap.get(environmentTenantIdKey))) {
-                final TenantStream tenantStream = new TenantStream(environmentTenantIdKey, redisCommands);
+                final TenantStream tenantStream = new TenantStream(environmentTenantIdKey, cacheStream);
                 tenantStreamMap.put(environmentTenantIdKey, tenantStream);
             }
             return Optional.of(tenantStreamMap.get(environmentTenantIdKey));

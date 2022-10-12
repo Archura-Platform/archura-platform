@@ -1,7 +1,6 @@
 package io.archura.platform.internal.stream;
 
 import io.archura.platform.api.stream.LightStream;
-import io.lettuce.core.api.sync.RedisCommands;
 import jdk.internal.reflect.Reflection;
 import lombok.RequiredArgsConstructor;
 
@@ -12,14 +11,14 @@ import java.util.Set;
 public class TenantStream implements LightStream {
 
     static {
-        Reflection.registerFieldsToFilter(TenantStream.class, Set.of("tenantKey", "redisCommands"));
+        Reflection.registerFieldsToFilter(TenantStream.class, Set.of("tenantKey", "cacheStream"));
     }
 
     private final String tenantKey;
-    private final RedisCommands<String, String> redisCommands;
+    private final CacheStream<String, Map<String, String>> cacheStream;
 
     public String send(final String topicName, final Map<String, String> message) {
         final String streamKey = String.format("%s-%s", tenantKey, topicName);
-        return redisCommands.xadd(streamKey, message);
+        return cacheStream.send(streamKey, message);
     }
 }

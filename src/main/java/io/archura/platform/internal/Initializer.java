@@ -10,17 +10,18 @@ import io.archura.platform.api.logger.Logger;
 import io.archura.platform.api.type.functionalcore.ContextConsumer;
 import io.archura.platform.api.type.functionalcore.StreamConsumer;
 import io.archura.platform.external.FilterFunctionExecutor;
+import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.configuration.CacheConfiguration;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.configuration.IIFEConfiguration;
 import io.archura.platform.internal.configuration.ScheduledConfiguration;
 import io.archura.platform.internal.configuration.StreamConfiguration;
+import io.archura.platform.internal.stream.CacheStream;
 import io.lettuce.core.Consumer;
 import io.lettuce.core.RedisBusyException;
 import io.lettuce.core.StreamMessage;
 import io.lettuce.core.XGroupCreateArgs;
 import io.lettuce.core.XReadArgs;
-import io.lettuce.core.api.sync.RedisCommands;
 import lombok.RequiredArgsConstructor;
 
 import java.net.http.HttpClient;
@@ -46,7 +47,6 @@ public class Initializer {
     private final ExecutorService executorService;
     private final Assets assets;
     private final FilterFunctionExecutor filterFunctionExecutor;
-
 
     public void initialize() {
         final GlobalConfiguration globalConfiguration = loadGlobalConfiguration();
@@ -76,7 +76,7 @@ public class Initializer {
 
     private CacheConfiguration createCacheConfiguration(final String redisUrl) {
         final CacheConfiguration cacheConfiguration = new CacheConfiguration(redisUrl);
-        cacheConfiguration.createRedisConnectionFactory();
+        cacheConfiguration.createConnections();
         return cacheConfiguration;
     }
 
@@ -96,8 +96,9 @@ public class Initializer {
     }
 
     private void executeIIFEFunctions(GlobalConfiguration globalConfiguration) {
-        // get redis commands
-        final RedisCommands<String, String> redisCommands = globalConfiguration.getCacheConfiguration().getRedisCommands();
+        // get commands
+        final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
+        final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
         // traverse configurations and execute functions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -120,7 +121,7 @@ public class Initializer {
                     try {
                         // create context
                         final String logLevel = getIIFELogLevel(globalConfig, iffeConfig, environmentConfig, tenantConfig, functionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
                         // create function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final ContextConsumer contextConsumer = getIIFEFunction(codeRepositoryUrl, functionConfiguration, query);
@@ -128,7 +129,7 @@ public class Initializer {
                         executorService.submit(() -> filterFunctionExecutor.execute(context, contextConsumer));
                     } catch (Exception e) {
                         final String logLevel = getIIFELogLevel(globalConfig, iffeConfig, environmentConfig, tenantConfig, functionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
                         context.getLogger().error("Error occurred while running IIFE function: %s - %s, error: %s", functionConfiguration.getName(), functionConfiguration.getVersion(), e.getMessage());
                     }
                 }
@@ -206,15 +207,15 @@ public class Initializer {
             final String environmentName,
             final String tenantId,
             final String logLevel,
-            final RedisCommands<String, String> redisCommands
-    ) {
+            final HashCache<String, String> hashCache,
+            final CacheStream<String, Map<String, String>> cacheStream) {
         final HashMap<String, Object> attributes = new HashMap<>();
         attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), environmentName);
         attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), tenantId);
         if (nonNull(logLevel)) {
             attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), logLevel);
         }
-        assets.buildContext(attributes, redisCommands);
+        assets.buildContext(attributes, hashCache, cacheStream);
         return (Context) attributes.get(Context.class.getSimpleName());
     }
 
@@ -234,8 +235,9 @@ public class Initializer {
     }
 
     private void executeStreamFunctions(final GlobalConfiguration globalConfiguration) {
-        // get redis commands
-        final RedisCommands<String, String> redisCommands = globalConfiguration.getCacheConfiguration().getRedisCommands();
+        // get commands
+        final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
+        final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
         // traverse configurations and create subscriptions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -258,17 +260,17 @@ public class Initializer {
                     try {
                         // create context
                         final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
                         // create consumer function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final StreamConsumer streamConsumer = getStreamConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
                         // start/register stream function subscription
                         final String topic = consumerConfiguration.getTopic();
-                        startStreamConsumerSubscription(environmentName, tenantId, topic, context, streamConsumer, redisCommands);
+                        startStreamConsumerSubscription(environmentName, tenantId, topic, context, streamConsumer, cacheStream);
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
                         context.getLogger().error("Error occurred while subscribing Stream function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
                     }
                 }
@@ -302,27 +304,25 @@ public class Initializer {
             final String topic,
             final Context context,
             final StreamConsumer streamConsumer,
-            final RedisCommands<String, String> redisCommands
+            final CacheStream<String, Map<String, String>> cacheStream
     ) {
         final Logger logger = context.getLogger();
         // CREATE STREAM AND GROUP FOR ENV-TENANT-TOPIC
         final String environmentTenantTopicName = String.format("%s|%s-%s", environment, tenantId, topic); // default|default-key1
 
-//        final XReadArgs.StreamOffset<String> streamOffset = XReadArgs.StreamOffset.latest(environmentTenantTopicName);
         final XReadArgs.StreamOffset<String> streamOffset = XReadArgs.StreamOffset.from(environmentTenantTopicName, "0-0");
         final XGroupCreateArgs xGroupCreateArgs = XGroupCreateArgs.Builder.mkstream();
         try {
-            //final String result = redisCommands.xgroupCreate(streamOffset, environmentTenantTopicName, xGroupCreateArgs);
-            final String result = redisCommands.xgroupCreate(streamOffset, environmentTenantTopicName, xGroupCreateArgs);
+            final String result = cacheStream.createGroup(streamOffset, environmentTenantTopicName, xGroupCreateArgs);
             logger.debug("Group '%s' created under topic '%s' with result: %s ", environmentTenantTopicName, environmentTenantTopicName, result);
         } catch (RedisBusyException exception) {
             logger.debug("Group '%s' already exists for topic '%s', message: %s", environmentTenantTopicName, environmentTenantTopicName, exception.getMessage());
         }
         executorService.execute(() -> {
-            while (nonNull(redisCommands.clientId())) {
+            while (true) {
                 try {
                     Thread.sleep(Duration.ofMillis(1000));
-                    List<StreamMessage<String, String>> streamMessages = redisCommands.xreadgroup(
+                    final List<StreamMessage<String, String>> streamMessages = cacheStream.readMessageFromGroup(
                             Consumer.from(environmentTenantTopicName, environmentTenantTopicName),
                             XReadArgs.StreamOffset.lastConsumed(environmentTenantTopicName)
                     );
@@ -331,10 +331,10 @@ public class Initializer {
                         streamMessages.forEach(message -> {
                             try {
                                 filterFunctionExecutor.execute(context, streamConsumer, message.getId(), message.getBody());
-                                redisCommands.xack(environmentTenantTopicName, environmentTenantTopicName, message.getId());
+                                cacheStream.acknowledge(environmentTenantTopicName, environmentTenantTopicName, message.getId());
                                 logger.info("Stream message acknowledged, id: '%s'", message.getId());
                             } catch (Exception exception) {
-                                logger.error("Could not consume message: '%s'", message);
+                                logger.error("Could not consume message: '%s', error: '%s'", message, exception.getMessage());
                             }
                         });
                     }
@@ -366,8 +366,9 @@ public class Initializer {
     }
 
     private void executeScheduledFunctions(final GlobalConfiguration globalConfiguration) {
-        // get redis commands
-        final RedisCommands<String, String> redisCommands = globalConfiguration.getCacheConfiguration().getRedisCommands();
+        // get commands
+        final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
+        final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
         // traverse configurations and create schedules
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -390,7 +391,7 @@ public class Initializer {
                     try {
                         // create context
                         final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
                         // create consumer function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final ContextConsumer contextConsumer = getScheduledFunction(codeRepositoryUrl, scheduledFunctionConfiguration, query);
@@ -399,7 +400,7 @@ public class Initializer {
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, redisCommands);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
                         context.getLogger().error("Error occurred while scheduling scheduled function: %s - %s, error: %s", scheduledFunctionConfiguration.getName(), scheduledFunctionConfiguration.getVersion(), e.getMessage());
                     }
                 }
@@ -417,8 +418,7 @@ public class Initializer {
         try {
             final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
             if (ContextConsumer.class.isAssignableFrom(object.getClass())) {
-                @SuppressWarnings("unchecked") final ContextConsumer contextConsumer = (ContextConsumer) object;
-                return contextConsumer;
+                return (ContextConsumer) object;
             } else {
                 throw new FunctionIsNotAContextConsumerException(String.format("Resource is not a ContextConsumer, url: %s", resourceUrl));
             }
