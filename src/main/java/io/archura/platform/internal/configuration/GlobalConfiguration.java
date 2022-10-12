@@ -21,6 +21,7 @@ public class GlobalConfiguration {
     private IIFEConfiguration iifeConfiguration;
     private StreamConfiguration streamConfiguration;
     private ScheduledConfiguration scheduledConfiguration;
+    private SubscribedConfiguration subscribedConfiguration;
 
     public static void setInstance(final GlobalConfiguration globalConfiguration) {
         instance = globalConfiguration;

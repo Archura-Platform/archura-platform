@@ -7,6 +7,7 @@ import io.archura.platform.api.type.Configurable;
 import io.archura.platform.api.type.functionalcore.ContextConsumer;
 import io.archura.platform.api.type.functionalcore.HandlerFunction;
 import io.archura.platform.api.type.functionalcore.StreamConsumer;
+import io.archura.platform.api.type.functionalcore.SubscriptionConsumer;
 
 import java.util.Collections;
 import java.util.Map;
@@ -17,6 +18,10 @@ public class FilterFunctionExecutor {
 
     public void execute(Context context, StreamConsumer streamConsumer, String key, Map<String, String> value) {
         streamConsumer.consume(context, key, value);
+    }
+
+    public void execute(Context context, SubscriptionConsumer subscriptionConsumer, String channel, String message) {
+        subscriptionConsumer.consume(context, channel, message);
     }
 
     public void execute(Context context, ContextConsumer contextConsumer) {

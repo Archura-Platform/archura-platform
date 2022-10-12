@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 @Data
-public class ScheduledConfiguration {
+public class SubscribedConfiguration {
     private Map<String, EnvironmentConfiguration> environments = new HashMap<>();
     private Configuration config = new Configuration();
 
@@ -22,16 +22,15 @@ public class ScheduledConfiguration {
 
     @Data
     public static class TenantConfiguration {
-        private List<FunctionConfiguration> functions = new ArrayList<>();
+        private List<ConsumerConfiguration> subscribers = new ArrayList<>();
         private Configuration config = new Configuration();
     }
 
     @Data
-    public static class FunctionConfiguration {
+    public static class ConsumerConfiguration {
         private String name;
         private String version;
-        private long delay;
-        private String timeUnit;
+        private String channel;
         private String logLevel;
         private JsonNode config;
     }
