@@ -19,6 +19,7 @@ import io.archura.platform.internal.configuration.IIFEConfiguration;
 import io.archura.platform.internal.configuration.ScheduledConfiguration;
 import io.archura.platform.internal.configuration.StreamConfiguration;
 import io.archura.platform.internal.configuration.SubscribedConfiguration;
+import io.archura.platform.internal.publish.MessagePublisher;
 import io.archura.platform.internal.pubsub.PublishListener;
 import io.archura.platform.internal.pubsub.Subscriber;
 import io.archura.platform.internal.stream.CacheStream;
@@ -106,6 +107,7 @@ public class Initializer {
         // get commands
         final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
         final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
+        final MessagePublisher messagePublisher = globalConfiguration.getCacheConfiguration().getMessagePublisher();
         // traverse configurations and execute functions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -128,7 +130,7 @@ public class Initializer {
                     try {
                         // create context
                         final String logLevel = getIIFELogLevel(globalConfig, iffeConfig, environmentConfig, tenantConfig, functionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
                         // create function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final ContextConsumer contextConsumer = getIIFEFunction(codeRepositoryUrl, functionConfiguration, query);
@@ -136,7 +138,7 @@ public class Initializer {
                         executorService.submit(() -> filterFunctionExecutor.execute(context, contextConsumer));
                     } catch (Exception e) {
                         final String logLevel = getIIFELogLevel(globalConfig, iffeConfig, environmentConfig, tenantConfig, functionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
                         context.getLogger().error("Error occurred while running IIFE function: %s - %s, error: %s", functionConfiguration.getName(), functionConfiguration.getVersion(), e.getMessage());
                     }
                 }
@@ -215,14 +217,16 @@ public class Initializer {
             final String tenantId,
             final String logLevel,
             final HashCache<String, String> hashCache,
-            final CacheStream<String, Map<String, String>> cacheStream) {
+            final CacheStream<String, Map<String, String>> cacheStream,
+            final MessagePublisher messagePublisher
+    ) {
         final HashMap<String, Object> attributes = new HashMap<>();
         attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), environmentName);
         attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), tenantId);
         if (nonNull(logLevel)) {
             attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), logLevel);
         }
-        assets.buildContext(attributes, hashCache, cacheStream);
+        assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
         return (Context) attributes.get(Context.class.getSimpleName());
     }
 
@@ -245,6 +249,8 @@ public class Initializer {
         // get commands
         final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
         final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
+        final MessagePublisher messagePublisher = globalConfiguration.getCacheConfiguration().getMessagePublisher();
+
         // traverse configurations and create subscriptions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -267,7 +273,7 @@ public class Initializer {
                     try {
                         // create context
                         final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
                         // create consumer function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final StreamConsumer streamConsumer = getStreamConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
@@ -277,7 +283,7 @@ public class Initializer {
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
                         context.getLogger().error("Error occurred while subscribing Stream function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
                     }
                 }
@@ -315,7 +321,7 @@ public class Initializer {
     ) {
         final Logger logger = context.getLogger();
         // CREATE STREAM AND GROUP FOR ENV-TENANT-TOPIC
-        final String environmentTenantTopicName = String.format("%s|%s-%s", environment, tenantId, topic); // default|default-key1
+        final String environmentTenantTopicName = String.format("stream|%s|%s|%s", environment, tenantId, topic); // default|default-key1
 
         final XReadArgs.StreamOffset<String> streamOffset = XReadArgs.StreamOffset.from(environmentTenantTopicName, "0-0");
         final XGroupCreateArgs xGroupCreateArgs = XGroupCreateArgs.Builder.mkstream();
@@ -376,6 +382,7 @@ public class Initializer {
         // get commands
         final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
         final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
+        final MessagePublisher messagePublisher = globalConfiguration.getCacheConfiguration().getMessagePublisher();
         // traverse configurations and create schedules
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -398,7 +405,7 @@ public class Initializer {
                     try {
                         // create context
                         final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
                         // create consumer function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final ContextConsumer contextConsumer = getScheduledFunction(codeRepositoryUrl, scheduledFunctionConfiguration, query);
@@ -407,7 +414,7 @@ public class Initializer {
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getScheduledFunctionLogLevel(globalConfig, scheduledConfig, environmentConfig, tenantConfig, scheduledFunctionConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
                         context.getLogger().error("Error occurred while scheduling scheduled function: %s - %s, error: %s", scheduledFunctionConfiguration.getName(), scheduledFunctionConfiguration.getVersion(), e.getMessage());
                     }
                 }
@@ -510,6 +517,7 @@ public class Initializer {
         final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
         final Subscriber subscriber = globalConfiguration.getCacheConfiguration().getSubscriber();
         final PublishListener publishListener = globalConfiguration.getCacheConfiguration().getPublishListener();
+        final MessagePublisher messagePublisher = globalConfiguration.getCacheConfiguration().getMessagePublisher();
         // traverse configurations and create subscriptions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -532,7 +540,7 @@ public class Initializer {
                     try {
                         // create context
                         final String logLevel = getSubscribedConsumerLogLevel(globalConfig, subscribedConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
                         // create consumer function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final SubscriptionConsumer subscriptionConsumer = getSubscriptionConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
@@ -542,7 +550,7 @@ public class Initializer {
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getSubscribedConsumerLogLevel(globalConfig, subscribedConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream);
+                        final Context context = createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
                         context.getLogger().error("Error occurred while subscribing Subscribed function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
                     }
                 }
@@ -604,7 +612,7 @@ public class Initializer {
             final Subscriber subscriber,
             final PublishListener publishListener) {
         final Logger logger = context.getLogger();
-        final String environmentTenantKey = String.format("channel|%s|%s-%s", environment, tenantId, channel);
+        final String environmentTenantKey = String.format("channel|%s|%s|%s", environment, tenantId, channel);
         try {
             subscriber.subscribe(environmentTenantKey);
             publishListener.register(environmentTenantKey, context, subscribedConsumer);

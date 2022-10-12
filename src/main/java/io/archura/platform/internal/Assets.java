@@ -9,6 +9,7 @@ import io.archura.platform.api.cache.Cache;
 import io.archura.platform.api.context.Context;
 import io.archura.platform.api.exception.ConfigurationException;
 import io.archura.platform.api.logger.Logger;
+import io.archura.platform.api.publish.Publisher;
 import io.archura.platform.api.stream.LightStream;
 import io.archura.platform.api.type.Configurable;
 import io.archura.platform.external.FilterFunctionExecutor;
@@ -16,6 +17,8 @@ import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.cache.TenantCache;
 import io.archura.platform.internal.context.RequestContext;
 import io.archura.platform.internal.logging.LoggerFactory;
+import io.archura.platform.internal.publish.MessagePublisher;
+import io.archura.platform.internal.publish.TenantPublisher;
 import io.archura.platform.internal.stream.CacheStream;
 import io.archura.platform.internal.stream.TenantStream;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +42,7 @@ public class Assets {
 
     private final Map<String, TenantCache> tenantCacheMap = new HashMap<>();
     private final Map<String, TenantStream> tenantStreamMap = new HashMap<>();
+    private final Map<String, TenantPublisher> tenantPublisherMap = new HashMap<>();
     private final Map<String, Class<?>> remoteClassMap = new HashMap<>();
     private final Map<String, HttpClient> tenantHttpClientMap = new HashMap<>();
     private final ObjectMapper objectMapper;
@@ -89,10 +93,13 @@ public class Assets {
     public void buildContext(
             final Map<String, Object> attributes,
             final HashCache<String, String> hashCache,
-            final CacheStream<String, Map<String, String>> cacheStream) {
+            final CacheStream<String, Map<String, String>> cacheStream,
+            final MessagePublisher messagePublisher
+    ) {
         final RequestContext context = RequestContext.builder()
                 .cache(getTenantCache(attributes, hashCache))
                 .lightStream(getTenantStream(attributes, cacheStream))
+                .publisher(getPublisher(attributes, messagePublisher))
                 .logger(getLogger(attributes))
                 .httpClient(getHttpClient(attributes))
                 .objectMapper(getObjectMapper(attributes))
@@ -126,6 +133,23 @@ public class Assets {
                 tenantStreamMap.put(environmentTenantIdKey, tenantStream);
             }
             return Optional.of(tenantStreamMap.get(environmentTenantIdKey));
+        } else {
+            return Optional.empty();
+        }
+    }
+
+    private Optional<Publisher> getPublisher(
+            final Map<String, Object> attributes,
+            final MessagePublisher messagePublisher
+    ) {
+        if (attributes.containsKey(GlobalKeys.REQUEST_ENVIRONMENT.getKey())
+                && attributes.containsKey(EnvironmentKeys.REQUEST_TENANT_ID.getKey())) {
+            final String environmentTenantIdKey = getEnvironmentTenantKey(attributes);
+            if (isNull(tenantPublisherMap.get(environmentTenantIdKey))) {
+                final TenantPublisher tenantPublisher = new TenantPublisher(environmentTenantIdKey, messagePublisher);
+                tenantPublisherMap.put(environmentTenantIdKey, tenantPublisher);
+            }
+            return Optional.of(tenantPublisherMap.get(environmentTenantIdKey));
         } else {
             return Optional.empty();
         }

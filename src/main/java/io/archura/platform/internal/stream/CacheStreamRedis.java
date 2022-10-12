@@ -27,11 +27,6 @@ public class CacheStreamRedis implements CacheStream<String, Map<String, String>
     }
 
     @Override
-    public Long clientId() {
-        return redisCommands.clientId();
-    }
-
-    @Override
     public List<StreamMessage<String, String>> readMessageFromGroup(Consumer<String> from, XReadArgs.StreamOffset<String> lastConsumed) {
         return redisCommands.xreadgroup(from, lastConsumed);
     }

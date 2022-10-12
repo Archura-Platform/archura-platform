@@ -16,6 +16,7 @@ import io.archura.platform.api.type.functionalcore.HandlerFunction;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
+import io.archura.platform.internal.publish.MessagePublisher;
 import io.archura.platform.internal.stream.CacheStream;
 import lombok.RequiredArgsConstructor;
 
@@ -50,10 +51,11 @@ public class RequestHandler {
             final String logLevel = globalConfiguration.getConfig().getLogLevel();
             final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
             final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
+            final MessagePublisher messagePublisher = globalConfiguration.getCacheConfiguration().getMessagePublisher();
 
             final Map<String, Object> attributes = request.getAttributes();
             attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), logLevel);
-            assets.buildContext(attributes, hashCache, cacheStream);
+            assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
 
             final List<UnaryOperator<HttpServerRequest>> globalPreFilters = getGlobalPreFilters(
                     globalConfiguration.getPre(),
@@ -62,7 +64,7 @@ public class RequestHandler {
             for (UnaryOperator<HttpServerRequest> preFilter : globalPreFilters) {
                 assets.getLogger(attributes).debug("Will run global PreFilter: %s", preFilter.getClass().getSimpleName());
                 request = filterFunctionExecutor.execute(request, preFilter);
-                assets.buildContext(attributes, hashCache, cacheStream);
+                assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
             }
 
             String environmentName = String.valueOf(attributes.get(GlobalKeys.REQUEST_ENVIRONMENT.getKey()));
@@ -74,11 +76,11 @@ public class RequestHandler {
             for (UnaryOperator<HttpServerRequest> preFilter : environmentPreFilters) {
                 assets.getLogger(attributes).debug("Will run environment PreFilter: %s", preFilter.getClass().getSimpleName());
                 request = filterFunctionExecutor.execute(request, preFilter);
-                assets.buildContext(attributes, hashCache, cacheStream);
+                assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
             }
             /* REMOVE */
             attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), EnvironmentKeys.DEFAULT_TENANT_ID.getKey());
-            assets.buildContext(attributes, hashCache, cacheStream);
+            assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
 
             String tenantId = String.valueOf(attributes.get(EnvironmentKeys.REQUEST_TENANT_ID.getKey()));
             final List<UnaryOperator<HttpServerRequest>> tenantPreFilters = getTenantPreFilters(
@@ -90,7 +92,7 @@ public class RequestHandler {
             for (UnaryOperator<HttpServerRequest> preFilter : tenantPreFilters) {
                 assets.getLogger(attributes).debug("Will run tenant PreFilter: %s", preFilter.getClass().getSimpleName());
                 request = filterFunctionExecutor.execute(request, preFilter);
-                assets.buildContext(attributes, hashCache, cacheStream);
+                assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
             }
 
             final String routeId = String.valueOf(request.getAttributes().getOrDefault(TenantKeys.ROUTE_ID.getKey(), TenantKeys.CATCH_ALL_ROUTE_KEY.getKey()));
@@ -104,7 +106,7 @@ public class RequestHandler {
             for (UnaryOperator<HttpServerRequest> preFilter : routePreFilters) {
                 assets.getLogger(attributes).debug("Will run route PreFilter: %s", preFilter.getClass().getSimpleName());
                 request = filterFunctionExecutor.execute(request, preFilter);
-                assets.buildContext(attributes, hashCache, cacheStream);
+                assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
             }
 
             final Optional<HandlerFunction<HttpServerResponse>> tenantFunctionOptional = getTenantFunctions(

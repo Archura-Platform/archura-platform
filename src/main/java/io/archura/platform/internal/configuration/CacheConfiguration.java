@@ -3,6 +3,8 @@ package io.archura.platform.internal.configuration;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.cache.HashCacheRedis;
+import io.archura.platform.internal.publish.MessagePublisher;
+import io.archura.platform.internal.publish.RedisMessagePublisher;
 import io.archura.platform.internal.pubsub.PublishListener;
 import io.archura.platform.internal.pubsub.Subscriber;
 import io.archura.platform.internal.pubsub.SubscriberRedis;
@@ -23,6 +25,7 @@ public class CacheConfiguration {
     private RedisCommands<String, String> redisCommands;
     private Subscriber subscriber;
     private PublishListener publishListener;
+    private MessagePublisher messagePublisher;
 
     public CacheConfiguration(final String cacheUrl) {
         this.cacheUrl = cacheUrl;
@@ -50,9 +53,9 @@ public class CacheConfiguration {
         final SubscriberRedis pubSubRedis = new SubscriberRedis(pubSubCommands);
         this.publishListener = new PublishListener(executorService, filterFunctionExecutor);
         pubSub.addListener(this.publishListener);
+        this.messagePublisher = new RedisMessagePublisher(pubSubCommands);
         this.subscriber = pubSubRedis;
     }
-
 
     public HashCache<String, String> getHashCache() {
         return new HashCacheRedis(redisCommands);
@@ -68,6 +71,10 @@ public class CacheConfiguration {
 
     public PublishListener getPublishListener() {
         return publishListener;
+    }
+
+    public MessagePublisher getMessagePublisher() {
+        return messagePublisher;
     }
 }
 

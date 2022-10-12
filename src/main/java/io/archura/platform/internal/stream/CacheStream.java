@@ -12,8 +12,6 @@ public interface CacheStream<I, M> {
 
     String createGroup(XReadArgs.StreamOffset<I> streamOffset, String group, XGroupCreateArgs args);
 
-    Long clientId();
-
     List<StreamMessage<I, I>> readMessageFromGroup(Consumer<I> from, XReadArgs.StreamOffset<I> lastConsumed);
 
     void acknowledge(String topic, String group, I messageIds);

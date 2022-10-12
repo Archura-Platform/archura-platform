@@ -18,7 +18,7 @@ public class TenantStream implements LightStream {
     private final CacheStream<String, Map<String, String>> cacheStream;
 
     public String send(final String topicName, final Map<String, String> message) {
-        final String streamKey = String.format("%s-%s", tenantKey, topicName);
+        final String streamKey = String.format("stream|%s|%s", tenantKey, topicName);
         return cacheStream.send(streamKey, message);
     }
 }
