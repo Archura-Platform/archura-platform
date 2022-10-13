@@ -99,7 +99,7 @@ public class StreamFunctionLoader {
                         // create context
                         final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
                         final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
-                        context.getLogger().error("Error occurred while subscribing Stream function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
+                        context.getLogger().error("Error occurred while creating Stream function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
                     }
                 }
             }

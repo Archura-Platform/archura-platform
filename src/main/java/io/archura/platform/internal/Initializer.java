@@ -15,30 +15,34 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadFactory;
 
 @Slf4j
-@RequiredArgsConstructor
 public class Initializer {
 
-    private final String configRepositoryUrl;
-    private final HttpClient configurationHttpClient;
-    private final ThreadFactory threadFactory;
-    private final ExecutorService executorService;
-    private final Assets assets;
-    private final FilterFunctionExecutor filterFunctionExecutor;
+    private final GlobalConfigurationLoader globalConfigurationLoader;
+    private final IIFEFunctionLoader iifeFunctionLoader;
+    private final StreamFunctionLoader streamFunctionLoader;
+    private final SubscribedFunctionLoader subscribedFunctionLoader;
+    private final ScheduledFunctionLoader scheduledFunctionLoader;
+
+    public Initializer(
+            final String configRepositoryUrl,
+            final HttpClient configurationHttpClient,
+            final ThreadFactory threadFactory,
+            final ExecutorService executorService,
+            final Assets assets,
+            final FilterFunctionExecutor filterFunctionExecutor
+    ) {
+        globalConfigurationLoader = new GlobalConfigurationLoader(configRepositoryUrl, assets, configurationHttpClient, executorService, filterFunctionExecutor);
+        iifeFunctionLoader = new IIFEFunctionLoader(configRepositoryUrl, assets, configurationHttpClient, executorService, filterFunctionExecutor);
+        streamFunctionLoader = new StreamFunctionLoader(configRepositoryUrl, assets, configurationHttpClient, executorService, filterFunctionExecutor);
+        subscribedFunctionLoader = new SubscribedFunctionLoader(configRepositoryUrl, assets, configurationHttpClient);
+        scheduledFunctionLoader = new ScheduledFunctionLoader(configRepositoryUrl, assets, configurationHttpClient, threadFactory, filterFunctionExecutor);
+    }
 
     public void initialize() {
-        final GlobalConfigurationLoader globalConfigurationLoader = new GlobalConfigurationLoader(configRepositoryUrl, assets, configurationHttpClient, executorService, filterFunctionExecutor);
         final GlobalConfiguration globalConfiguration = globalConfigurationLoader.load();
-
-        final IIFEFunctionLoader iifeFunctionLoader = new IIFEFunctionLoader(configRepositoryUrl, assets, configurationHttpClient, executorService, filterFunctionExecutor);
         iifeFunctionLoader.load(globalConfiguration);
-
-        final StreamFunctionLoader streamFunctionLoader = new StreamFunctionLoader(configRepositoryUrl, assets, configurationHttpClient, executorService, filterFunctionExecutor);
         streamFunctionLoader.load(globalConfiguration);
-
-        final SubscribedFunctionLoader subscribedFunctionLoader = new SubscribedFunctionLoader(configRepositoryUrl, assets, configurationHttpClient);
         subscribedFunctionLoader.load(globalConfiguration);
-
-        ScheduledFunctionLoader scheduledFunctionLoader = new ScheduledFunctionLoader(configRepositoryUrl, assets, configurationHttpClient, threadFactory, filterFunctionExecutor);
         scheduledFunctionLoader.load(globalConfiguration);
     }
 
