@@ -34,6 +34,9 @@ target/
 *.ids
 *.orig
 out/
+.fleet
+.fleet/
+.fleet/**
 
 ######################
 # Eclipse
