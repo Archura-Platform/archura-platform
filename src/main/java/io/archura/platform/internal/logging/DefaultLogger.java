@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import static java.util.Objects.nonNull;
+
 
 /**
  * Prepares the necessary data for the log message.
@@ -101,7 +103,7 @@ public class DefaultLogger implements Logger {
         final String classMethodLineSub = classMethodLine.length() > 50 ? classMethodLine.substring(classMethodLine.length() - 50) : classMethodLine;
 
         final String thread = String.format("%s-%s", Thread.currentThread().threadId(), Thread.currentThread().getName());
-        final String logMessage = String.format(message, arguments);
+        final String logMessage = nonNull(message) ? String.format(message, arguments) : "null";
         final String date = DATETIME_FORMATTER.format(LocalDateTime.now());
         logWriter.log(logLevel, String.format(logTemplate,
                 date, logLevel, environment, tenantId, thread, classMethodLineSub, logMessage));

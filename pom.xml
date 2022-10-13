@@ -19,6 +19,7 @@
         <archura-platform-api.version>0.0.4</archura-platform-api.version>
         <jackson-databind.version>2.13.4</jackson-databind.version>
         <lettuce-core.version>6.2.1.RELEASE</lettuce-core.version>
+        <logback-classic.version>1.4.4</logback-classic.version>
     </properties>
     <dependencies>
         <dependency>
@@ -26,6 +27,12 @@
             <artifactId>archura-platform-api</artifactId>
             <version>${archura-platform-api.version}</version>
         </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback-classic.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>

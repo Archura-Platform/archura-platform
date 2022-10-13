@@ -1,0 +1,17 @@
+<configuration>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%date %level [NO_ENVI][NO_TENT][%-20thread][%-28logger:%line] - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="io.archura" level="debug" additivity="true">
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <root level="info">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</configuration>

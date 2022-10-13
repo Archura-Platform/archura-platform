@@ -5,6 +5,8 @@ import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.Assets;
 import io.archura.platform.internal.Initializer;
 import io.archura.platform.internal.RequestHandler;
+import io.archura.platform.internal.server.HttpServer;
+import io.archura.platform.internal.server.Server;
 import lombok.RequiredArgsConstructor;
 
 import java.net.http.HttpClient;
@@ -69,6 +71,10 @@ public class ApplicationConfiguration {
             final FilterFunctionExecutor filterFunctionExecutor
     ) {
         return new RequestHandler(configRepositoryUrl, httpClient, assets, filterFunctionExecutor);
+    }
+
+    public Server server() {
+        return new HttpServer();
     }
 
 }

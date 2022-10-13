@@ -15,6 +15,9 @@ public class ThreadSecurityManager extends SecurityManager {
     public void checkPermission(Permission perm, Object context) {
         if ("java.net.SocketPermission".equals(perm.getClass().getName())) {
             checkSocketAccess(perm);
+        } else if ("java.lang.RuntimePermission".equals(perm.getClass().getName())
+                && "createSecurityManager".equals(perm.getName())) {
+            checkReflectionAccess(perm);
         }
     }
 
@@ -34,6 +37,19 @@ public class ThreadSecurityManager extends SecurityManager {
             }
             if (!isAllowedAPI && element.getClassName().equals(FilterFunctionExecutor.class.getName())) {
                 throw new RuntimeException("Filters and Functions are not allowed to create sockets.");
+            }
+        }
+    }
+
+    private void checkReflectionAccess(Permission perm) {
+        boolean isReflectionCall = false;
+        for (StackTraceElement element : Thread.currentThread().getStackTrace()) {
+            if (element.getClassName().startsWith("java.lang.reflect")) {
+                isReflectionCall = true;
+                continue;
+            }
+            if (isReflectionCall && element.getClassName().equals(FilterFunctionExecutor.class.getName())) {
+                throw new RuntimeException("Filters and Functions are not allowed to use reflection API.");
             }
         }
     }

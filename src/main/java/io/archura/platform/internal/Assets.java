@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static java.util.Objects.isNull;
+import static java.util.Objects.nonNull;
 
 @RequiredArgsConstructor
 public class Assets {
@@ -175,6 +176,24 @@ public class Assets {
         final String environmentName = String.valueOf(attributes.getOrDefault(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), GlobalKeys.ENVIRONMENT_NOT_SET.getKey()));
         final String tenantId = String.valueOf(attributes.getOrDefault(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), EnvironmentKeys.TENANT_NOT_SET.getKey()));
         return String.format("%s|%s", environmentName, tenantId);
+    }
+
+    public Context createContextForEnvironmentAndTenant(
+            final String environmentName,
+            final String tenantId,
+            final String logLevel,
+            final HashCache<String, String> hashCache,
+            final CacheStream<String, Map<String, String>> cacheStream,
+            final MessagePublisher messagePublisher
+    ) {
+        final HashMap<String, Object> attributes = new HashMap<>();
+        attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), environmentName);
+        attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), tenantId);
+        if (nonNull(logLevel)) {
+            attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), logLevel);
+        }
+        buildContext(attributes, hashCache, cacheStream, messagePublisher);
+        return (Context) attributes.get(Context.class.getSimpleName());
     }
 
 }
