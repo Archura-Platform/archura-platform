@@ -135,22 +135,23 @@ public class StreamFunctionLoader {
     ) {
         final Logger logger = context.getLogger();
         // CREATE STREAM AND GROUP FOR ENV-TENANT-TOPIC
-        final String environmentTenantTopicName = String.format("stream|%s|%s|%s", environment, tenantId, topic); // default|default-key1
+        final String environmentTenantTopicName = String.format("stream|%s|%s|%s", environment, tenantId, topic);
+        final String environmentTenantTopicGroup = String.format("group|%s|%s|%s|%s", environment, tenantId, topic, streamConsumer.getClass().getSimpleName());
 
         final XReadArgs.StreamOffset<String> streamOffset = XReadArgs.StreamOffset.from(environmentTenantTopicName, "0-0");
         final XGroupCreateArgs xGroupCreateArgs = XGroupCreateArgs.Builder.mkstream();
         try {
-            final String result = cacheStream.createGroup(streamOffset, environmentTenantTopicName, xGroupCreateArgs);
-            logger.debug("Group '%s' created under topic '%s' with result: %s ", environmentTenantTopicName, environmentTenantTopicName, result);
+            final String result = cacheStream.createGroup(streamOffset, environmentTenantTopicGroup, xGroupCreateArgs);
+            logger.debug("Group '%s' created under topic '%s' with result: %s ", environmentTenantTopicGroup, environmentTenantTopicName, result);
         } catch (RedisBusyException exception) {
-            logger.debug("Group '%s' already exists for topic '%s', message: %s", environmentTenantTopicName, environmentTenantTopicName, exception.getMessage());
+            logger.debug("Group '%s' already exists for topic '%s', message: %s", environmentTenantTopicGroup, environmentTenantTopicName, exception.getMessage());
         }
         executorService.execute(() -> {
             while (true) {
                 try {
                     Thread.sleep(Duration.ofMillis(1000));
                     final List<StreamMessage<String, String>> streamMessages = cacheStream.readMessageFromGroup(
-                            Consumer.from(environmentTenantTopicName, environmentTenantTopicName),
+                            Consumer.from(environmentTenantTopicGroup, environmentTenantTopicGroup),
                             XReadArgs.StreamOffset.lastConsumed(environmentTenantTopicName)
                     );
                     if (nonNull(streamMessages) && !streamMessages.isEmpty()) {
@@ -158,7 +159,7 @@ public class StreamFunctionLoader {
                         streamMessages.forEach(message -> {
                             try {
                                 filterFunctionExecutor.execute(context, streamConsumer, message.getId(), message.getBody());
-                                cacheStream.acknowledge(environmentTenantTopicName, environmentTenantTopicName, message.getId());
+                                cacheStream.acknowledge(environmentTenantTopicName, environmentTenantTopicGroup, message.getId());
                                 logger.info("Stream message acknowledged, id: '%s'", message.getId());
                             } catch (Exception exception) {
                                 logger.error("Could not consume message: '%s', error: '%s'", message, exception.getMessage());
