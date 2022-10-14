@@ -24,7 +24,6 @@ import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.UnaryOperator;
 
 import static java.util.Objects.isNull;
 import static java.util.Objects.nonNull;
@@ -113,7 +112,10 @@ public class RequestHandler {
             final HttpServerResponse response = new HttpServerResponse();
             if (tenantFunctionOptional.isPresent()) {
                 final Function<HttpServerRequest, HttpServerResponse> tenantFunction = tenantFunctionOptional.get();
-                filterFunctionExecutor.execute(request, tenantFunction);
+                HttpServerResponse httpServerResponse = filterFunctionExecutor.execute(request, tenantFunction);
+                response.setStatus(httpServerResponse.getStatus());
+                response.setBytes(httpServerResponse.getBytes());
+                response.setHeaders(httpServerResponse.getHeaders());
             } else {
                 response.setStatus(HttpStatusCode.HTTP_NOT_FOUND);
                 response.setHeader("X-A-NotFound", String.format("%s-%s-%s", environmentName, tenantId, routeId));
@@ -255,11 +257,11 @@ public class RequestHandler {
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
             final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
-            if (UnaryOperator.class.isAssignableFrom(object.getClass())) {
+            if (Consumer.class.isAssignableFrom(object.getClass())) {
                 @SuppressWarnings("unchecked") final Consumer<HttpServerRequest> consumer = (Consumer<HttpServerRequest>) object;
                 return consumer;
             } else {
-                throw new PreFilterIsNotAUnaryOperatorException(String.format("Resource is not a UnaryOperator, url: %s", resourceUrl));
+                throw new PreFilterIsNotAConsumerException(String.format("Resource is not a Consumer, url: %s", resourceUrl));
             }
         } catch (Exception e) {
             throw new ResourceLoadException(e);

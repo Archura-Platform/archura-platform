@@ -1,5 +1,6 @@
 package io.archura.platform.internal.server;
 
+import com.sun.net.httpserver.HttpContext;
 import io.archura.platform.api.http.HttpServerRequest;
 import io.archura.platform.api.http.HttpServerResponse;
 import io.archura.platform.api.http.HttpStatusCode;
@@ -32,7 +33,7 @@ public class HttpServer implements Server {
         final InetSocketAddress serverAddress = new InetSocketAddress(globalConfiguration.getConfig().getHostname(), globalConfiguration.getConfig().getPort());
         localhost = com.sun.net.httpserver.HttpServer.create(serverAddress, globalConfiguration.getConfig().getBacklog());
         localhost.setExecutor(executorService);
-        localhost.createContext("/", exchange -> {
+        final HttpContext context = localhost.createContext("/", exchange -> {
             try {
                 final Map<String, List<String>> headers = exchange.getResponseHeaders()
                         .entrySet()
@@ -58,6 +59,7 @@ public class HttpServer implements Server {
                 exchange.getResponseBody().close();
             }
         });
+        context.getFilters().add(new RequestFilter(globalConfiguration.getConfig().getRequestTimeout()));
         final Logger logger = assets.getLogger(Collections.emptyMap());
         logger.info("HTTP server started on: %s:%s", localhost.getAddress().getHostName(), localhost.getAddress().getPort());
         localhost.start();

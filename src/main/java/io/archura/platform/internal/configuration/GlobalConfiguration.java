@@ -39,6 +39,7 @@ public class GlobalConfiguration {
         private String hostname = "0.0.0.0";
         private int port = 8080;
         private int backlog = 500;
+        private int requestTimeout = 30;
     }
 
     @Data

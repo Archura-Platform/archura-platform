@@ -154,7 +154,7 @@ public class LightStreamFunctionLoader {
                             XReadArgs.StreamOffset.lastConsumed(environmentTenantTopicName)
                     );
                     if (nonNull(streamMessages) && !streamMessages.isEmpty()) {
-                        logger.debug("Redis stream messages: '%s'", streamMessages);
+                        logger.debug("Stream messages: '%s'", streamMessages);
                         streamMessages.forEach(message -> {
                             try {
                                 filterFunctionExecutor.execute(context, lightStreamConsumer, message.getId(), message.getBody());
