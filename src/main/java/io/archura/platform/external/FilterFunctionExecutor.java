@@ -5,19 +5,17 @@ import io.archura.platform.api.http.HttpServerRequest;
 import io.archura.platform.api.http.HttpServerResponse;
 import io.archura.platform.api.type.Configurable;
 import io.archura.platform.api.type.functionalcore.ContextConsumer;
-import io.archura.platform.api.type.functionalcore.HandlerFunction;
-import io.archura.platform.api.type.functionalcore.StreamConsumer;
+import io.archura.platform.api.type.functionalcore.LightStreamConsumer;
 import io.archura.platform.api.type.functionalcore.SubscriptionConsumer;
 
 import java.util.Collections;
 import java.util.Map;
-import java.util.function.BiFunction;
-import java.util.function.UnaryOperator;
+import java.util.function.*;
 
 public class FilterFunctionExecutor {
 
-    public void execute(Context context, StreamConsumer streamConsumer, String key, Map<String, String> value) {
-        streamConsumer.consume(context, key, value);
+    public void execute(Context context, LightStreamConsumer lightStreamConsumer, String key, Map<String, String> value) {
+        lightStreamConsumer.consume(context, key, value);
     }
 
     public void execute(Context context, SubscriptionConsumer subscriptionConsumer, String channel, String message) {
@@ -28,16 +26,16 @@ public class FilterFunctionExecutor {
         contextConsumer.accept(context);
     }
 
-    public HttpServerRequest execute(HttpServerRequest request, UnaryOperator<HttpServerRequest> preFilter) {
-        return preFilter.apply(request);
+    public void execute(HttpServerRequest request, Consumer<HttpServerRequest> preFilter) {
+        preFilter.accept(request);
     }
 
-    public HttpServerResponse execute(HttpServerRequest request, HandlerFunction<HttpServerResponse> tenantFunction) {
-        return tenantFunction.handle(request);
+    public HttpServerResponse execute(HttpServerRequest request, Function<HttpServerRequest, HttpServerResponse> tenantFunction) {
+        return tenantFunction.apply(request);
     }
 
-    public HttpServerResponse execute(HttpServerRequest request, HttpServerResponse response, BiFunction<HttpServerRequest, HttpServerResponse, HttpServerResponse> postFilter) {
-        return postFilter.apply(request, response);
+    public void execute(HttpServerRequest request, HttpServerResponse response, BiConsumer<HttpServerRequest, HttpServerResponse> postFilter) {
+        postFilter.accept(request, response);
     }
 
     public void execute(Configurable configurable, Map<String, Object> config) {

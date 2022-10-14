@@ -1,12 +1,12 @@
 package io.archura.platform.internal.server;
 
+import io.archura.platform.api.http.HttpServerRequest;
 import io.archura.platform.api.http.HttpServerResponse;
 import io.archura.platform.api.http.HttpStatusCode;
 import io.archura.platform.api.logger.Logger;
 import io.archura.platform.internal.Assets;
 import io.archura.platform.internal.RequestHandler;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
-import io.archura.platform.internal.http.HttpServerRequestData;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -38,13 +38,14 @@ public class HttpServer implements Server {
                         .entrySet()
                         .stream()
                         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-                final HttpServerRequestData httpRequest = new HttpServerRequestData(
-                        exchange.getRequestURI(),
-                        exchange.getRequestMethod(),
-                        headers,
-                        exchange.getRequestBody(),
-                        exchange.getHttpContext().getAttributes()
-                );
+                final HttpServerRequest httpRequest = HttpServerRequest.builder()
+                        .requestURI(exchange.getRequestURI())
+                        .requestMethod(exchange.getRequestMethod())
+                        .requestHeaders(headers)
+                        .requestBody(exchange.getRequestBody())
+                        .attributes(exchange.getHttpContext().getAttributes())
+                        .remoteAddress(exchange.getRemoteAddress())
+                        .build();
                 final HttpServerResponse response = requestHandler.handle(httpRequest);
                 exchange.getResponseHeaders().putAll(response.getHeaders());
                 exchange.sendResponseHeaders(response.getStatus(), response.getBytes().length);

@@ -5,9 +5,8 @@ import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.initialize.IIFEFunctionLoader;
 import io.archura.platform.internal.initialize.GlobalConfigurationLoader;
 import io.archura.platform.internal.initialize.ScheduledFunctionLoader;
-import io.archura.platform.internal.initialize.StreamFunctionLoader;
+import io.archura.platform.internal.initialize.LightStreamFunctionLoader;
 import io.archura.platform.internal.initialize.SubscribedFunctionLoader;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.http.HttpClient;
@@ -19,7 +18,7 @@ public class Initializer {
 
     private final GlobalConfigurationLoader globalConfigurationLoader;
     private final IIFEFunctionLoader iifeFunctionLoader;
-    private final StreamFunctionLoader streamFunctionLoader;
+    private final LightStreamFunctionLoader lightStreamFunctionLoader;
     private final SubscribedFunctionLoader subscribedFunctionLoader;
     private final ScheduledFunctionLoader scheduledFunctionLoader;
 
@@ -33,7 +32,7 @@ public class Initializer {
     ) {
         globalConfigurationLoader = new GlobalConfigurationLoader(configRepositoryUrl, assets, configurationHttpClient, executorService, filterFunctionExecutor);
         iifeFunctionLoader = new IIFEFunctionLoader(configRepositoryUrl, assets, configurationHttpClient, executorService, filterFunctionExecutor);
-        streamFunctionLoader = new StreamFunctionLoader(configRepositoryUrl, assets, configurationHttpClient, executorService, filterFunctionExecutor);
+        lightStreamFunctionLoader = new LightStreamFunctionLoader(configRepositoryUrl, assets, configurationHttpClient, executorService, filterFunctionExecutor);
         subscribedFunctionLoader = new SubscribedFunctionLoader(configRepositoryUrl, assets, configurationHttpClient);
         scheduledFunctionLoader = new ScheduledFunctionLoader(configRepositoryUrl, assets, configurationHttpClient, threadFactory, filterFunctionExecutor);
     }
@@ -41,7 +40,7 @@ public class Initializer {
     public void initialize() {
         final GlobalConfiguration globalConfiguration = globalConfigurationLoader.load();
         iifeFunctionLoader.load(globalConfiguration);
-        streamFunctionLoader.load(globalConfiguration);
+        lightStreamFunctionLoader.load(globalConfiguration);
         subscribedFunctionLoader.load(globalConfiguration);
         scheduledFunctionLoader.load(globalConfiguration);
     }
