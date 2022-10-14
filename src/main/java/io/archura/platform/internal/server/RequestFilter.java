@@ -1,4 +1,4 @@
-package io.archura.platform.internal;
+package io.archura.platform.internal.server;
 
 import com.sun.net.httpserver.Filter;
 import com.sun.net.httpserver.HttpExchange;
@@ -12,7 +12,11 @@ import java.util.TimerTask;
 
 public class RequestFilter extends Filter {
 
-    private Integer requestTimeout = 30;
+    private final Integer requestTimeout;
+
+    public RequestFilter(final int requestTimeout) {
+        this.requestTimeout = requestTimeout;
+    }
 
     @Override
     public void doFilter(HttpExchange exchange, Chain chain) throws IOException {
