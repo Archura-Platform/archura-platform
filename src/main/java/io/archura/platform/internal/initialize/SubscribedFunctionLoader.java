@@ -98,7 +98,7 @@ public class SubscribedFunctionLoader {
                         // create context
                         final String logLevel = getSubscribedConsumerLogLevel(globalConfig, subscribedConfig, environmentConfig, tenantConfig, consumerConfiguration);
                         final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
-                        context.getLogger().error("Error occurred while subscribing Subscribed function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
+                        context.getLogger().error("Error occurred while creating Subscribed function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
                     }
                 }
             }

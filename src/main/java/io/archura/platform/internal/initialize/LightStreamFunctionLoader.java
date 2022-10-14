@@ -5,7 +5,7 @@ import io.archura.platform.api.context.Context;
 import io.archura.platform.api.exception.FunctionIsNotAStreamConsumerException;
 import io.archura.platform.api.exception.ResourceLoadException;
 import io.archura.platform.api.logger.Logger;
-import io.archura.platform.api.type.functionalcore.StreamConsumer;
+import io.archura.platform.api.type.functionalcore.LightStreamConsumer;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.Assets;
 import io.archura.platform.internal.cache.HashCache;
@@ -23,7 +23,7 @@ import java.util.concurrent.ExecutorService;
 
 import static java.util.Objects.nonNull;
 
-public class StreamFunctionLoader {
+public class LightStreamFunctionLoader {
 
     private final String configRepositoryUrl;
     private final Assets assets;
@@ -31,7 +31,7 @@ public class StreamFunctionLoader {
     private final ExecutorService executorService;
     private final FilterFunctionExecutor filterFunctionExecutor;
 
-    public StreamFunctionLoader(
+    public LightStreamFunctionLoader(
             final String configRepositoryUrl,
             final Assets assets,
             final HttpClient configurationHttpClient,
@@ -91,22 +91,22 @@ public class StreamFunctionLoader {
                         final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
                         // create consumer function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
-                        final StreamConsumer streamConsumer = getStreamConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
+                        final LightStreamConsumer lightStreamConsumer = getStreamConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
                         // start/register stream function subscription
                         final String topic = consumerConfiguration.getTopic();
-                        startStreamConsumerSubscription(environmentName, tenantId, topic, context, streamConsumer, cacheStream);
+                        startStreamConsumerSubscription(environmentName, tenantId, topic, context, lightStreamConsumer, cacheStream);
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
                         final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
-                        context.getLogger().error("Error occurred while subscribing Stream function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
+                        context.getLogger().error("Error occurred while creating Stream function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
                     }
                 }
             }
         }
     }
 
-    private StreamConsumer getStreamConsumerFunction(
+    private LightStreamConsumer getStreamConsumerFunction(
             final String codeServerURL,
             final StreamConfiguration.ConsumerConfiguration configuration,
             final String query
@@ -115,8 +115,8 @@ public class StreamFunctionLoader {
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
             final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
-            if (StreamConsumer.class.isAssignableFrom(object.getClass())) {
-                return (StreamConsumer) object;
+            if (LightStreamConsumer.class.isAssignableFrom(object.getClass())) {
+                return (LightStreamConsumer) object;
             } else {
                 throw new FunctionIsNotAStreamConsumerException(String.format("Resource is not a StreamConsumer, url: %s", resourceUrl));
             }
@@ -130,36 +130,35 @@ public class StreamFunctionLoader {
             final String tenantId,
             final String topic,
             final Context context,
-            final StreamConsumer streamConsumer,
+            final LightStreamConsumer lightStreamConsumer,
             final CacheStream<String, Map<String, String>> cacheStream
     ) {
         final Logger logger = context.getLogger();
         // CREATE STREAM AND GROUP FOR ENV-TENANT-TOPIC
-        final String environmentTenantTopicName = String.format("stream|%s|%s|%s", environment, tenantId, topic);
-        final String environmentTenantTopicGroup = String.format("group|%s|%s|%s|%s", environment, tenantId, topic, streamConsumer.getClass().getSimpleName());
+        final String environmentTenantTopicName = String.format("stream|%s|%s|%s", environment, tenantId, topic); // default|default-key1
 
         final XReadArgs.StreamOffset<String> streamOffset = XReadArgs.StreamOffset.from(environmentTenantTopicName, "0-0");
         final XGroupCreateArgs xGroupCreateArgs = XGroupCreateArgs.Builder.mkstream();
         try {
-            final String result = cacheStream.createGroup(streamOffset, environmentTenantTopicGroup, xGroupCreateArgs);
-            logger.debug("Group '%s' created under topic '%s' with result: %s ", environmentTenantTopicGroup, environmentTenantTopicName, result);
+            final String result = cacheStream.createGroup(streamOffset, environmentTenantTopicName, xGroupCreateArgs);
+            logger.debug("Group '%s' created under topic '%s' with result: %s ", environmentTenantTopicName, environmentTenantTopicName, result);
         } catch (RedisBusyException exception) {
-            logger.debug("Group '%s' already exists for topic '%s', message: %s", environmentTenantTopicGroup, environmentTenantTopicName, exception.getMessage());
+            logger.debug("Group '%s' already exists for topic '%s', message: %s", environmentTenantTopicName, environmentTenantTopicName, exception.getMessage());
         }
         executorService.execute(() -> {
             while (true) {
                 try {
                     Thread.sleep(Duration.ofMillis(1000));
                     final List<StreamMessage<String, String>> streamMessages = cacheStream.readMessageFromGroup(
-                            Consumer.from(environmentTenantTopicGroup, environmentTenantTopicGroup),
+                            Consumer.from(environmentTenantTopicName, environmentTenantTopicName),
                             XReadArgs.StreamOffset.lastConsumed(environmentTenantTopicName)
                     );
                     if (nonNull(streamMessages) && !streamMessages.isEmpty()) {
                         logger.debug("Redis stream messages: '%s'", streamMessages);
                         streamMessages.forEach(message -> {
                             try {
-                                filterFunctionExecutor.execute(context, streamConsumer, message.getId(), message.getBody());
-                                cacheStream.acknowledge(environmentTenantTopicName, environmentTenantTopicGroup, message.getId());
+                                filterFunctionExecutor.execute(context, lightStreamConsumer, message.getId(), message.getBody());
+                                cacheStream.acknowledge(environmentTenantTopicName, environmentTenantTopicName, message.getId());
                                 logger.info("Stream message acknowledged, id: '%s'", message.getId());
                             } catch (Exception exception) {
                                 logger.error("Could not consume message: '%s', error: '%s'", message, exception.getMessage());
