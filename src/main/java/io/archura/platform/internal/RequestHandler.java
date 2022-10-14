@@ -411,11 +411,11 @@ public class RequestHandler {
     private HttpServerResponse getErrorResponse(Throwable t, HttpServerRequest request) {
         final HttpServerResponse httpResponse = new HttpServerResponse();
         try {
+            httpResponse.setBytes(t.getMessage().getBytes(StandardCharsets.UTF_8));
             final int statusCode = Integer.parseInt(String.valueOf(request.getAttributes().get("RESPONSE_HTTP_STATUS")));
             httpResponse.setStatus(statusCode);
         } catch (NumberFormatException exception) {
             httpResponse.setStatus(HttpStatusCode.HTTP_INTERNAL_ERROR);
-            httpResponse.setBytes(exception.getMessage().getBytes(StandardCharsets.UTF_8));
         }
 
         final ErrorDetail errorDetail = getErrorDetails(t);
@@ -428,10 +428,12 @@ public class RequestHandler {
 
         try (final ByteArrayOutputStream bos = new ByteArrayOutputStream();
              final ObjectOutputStream oos = new ObjectOutputStream(bos)) {
-            final Object responseObject = request.getAttributes().getOrDefault("RESPONSE_MESSAGE", "");
-            oos.writeObject(responseObject);
-            final byte[] bytes = bos.toByteArray();
-            httpResponse.setBytes(bytes);
+            final Object responseObject = request.getAttributes().get("RESPONSE_MESSAGE");
+            if (nonNull(responseObject)) {
+                oos.writeObject(responseObject);
+                final byte[] bytes = bos.toByteArray();
+                httpResponse.setBytes(bytes);
+            }
         } catch (IOException exception) {
             httpResponse.setStatus(HttpStatusCode.HTTP_INTERNAL_ERROR);
             httpResponse.setBytes(exception.getMessage().getBytes(StandardCharsets.UTF_8));
