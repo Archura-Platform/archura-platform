@@ -1,6 +1,6 @@
 package io.archura.platform;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import io.archura.platform.api.mapper.Mapper;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.Assets;
 import io.archura.platform.internal.Initializer;
@@ -26,10 +26,10 @@ public class ArchuraPlatformApplication {
         final ApplicationConfiguration applicationConfiguration = new ApplicationConfiguration();
         final ThreadFactory threadFactory = applicationConfiguration.threadFactory();
         final ExecutorService executorService = applicationConfiguration.executorService(threadFactory);
-        final ObjectMapper objectMapper = applicationConfiguration.objectMapper();
+        final Mapper mapper = applicationConfiguration.objectMapper();
         final HttpClient httpClient = applicationConfiguration.httpClient();
         final FilterFunctionExecutor filterFunctionExecutor = applicationConfiguration.filterFunctionExecutor();
-        final Assets assets = applicationConfiguration.assets(objectMapper, httpClient, filterFunctionExecutor);
+        final Assets assets = applicationConfiguration.assets(mapper, httpClient, filterFunctionExecutor);
         final Initializer initializer = applicationConfiguration.initializer(configRepositoryUrl, httpClient, threadFactory, executorService, assets, filterFunctionExecutor);
         initializer.initialize();
 

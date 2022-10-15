@@ -1,14 +1,13 @@
 package io.archura.platform.internal;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.archura.platform.api.attribute.EnvironmentKeys;
 import io.archura.platform.api.attribute.GlobalKeys;
 import io.archura.platform.api.cache.Cache;
 import io.archura.platform.api.context.Context;
 import io.archura.platform.api.exception.ConfigurationException;
 import io.archura.platform.api.logger.Logger;
+import io.archura.platform.api.mapper.Mapper;
 import io.archura.platform.api.publish.Publisher;
 import io.archura.platform.api.stream.LightStream;
 import io.archura.platform.api.type.Configurable;
@@ -46,7 +45,7 @@ public class Assets {
     private final Map<String, TenantPublisher> tenantPublisherMap = new HashMap<>();
     private final Map<String, Class<?>> remoteClassMap = new HashMap<>();
     private final Map<String, HttpClient> tenantHttpClientMap = new HashMap<>();
-    private final ObjectMapper objectMapper;
+    private final Mapper mapper;
     private final HttpClient defaultHttpClient;
     private final FilterFunctionExecutor filterFunctionExecutor;
 
@@ -58,7 +57,7 @@ public class Assets {
         try {
             HttpResponse<InputStream> response = configurationHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() >= 200 && response.statusCode() <= 299) {
-                return objectMapper.readValue(response.body(), tClass);
+                return mapper.readValue(response.body().readAllBytes(), tClass);
             } else {
                 final String errorMessage = String.format("Configuration file could not be found, url: %s", url);
                 throw new ConfigurationException(errorMessage);
@@ -85,8 +84,7 @@ public class Assets {
     public void configure(JsonNode jsonNode, Object object) {
         if (Configurable.class.isAssignableFrom(object.getClass())) {
             final Configurable configurable = (Configurable) object;
-            final Map<String, Object> config = objectMapper.convertValue(jsonNode, new TypeReference<>() {
-            });
+            @SuppressWarnings("unchecked") final Map<String, Object> config = mapper.convertValue(jsonNode, Map.class);
             filterFunctionExecutor.execute(configurable, config);
         }
     }
@@ -103,7 +101,7 @@ public class Assets {
                 .publisher(getPublisher(attributes, messagePublisher))
                 .logger(getLogger(attributes))
                 .httpClient(getHttpClient(attributes))
-                .objectMapper(getObjectMapper(attributes))
+                .mapper(getMapper(attributes))
                 .build();
         attributes.put(Context.class.getSimpleName(), context);
     }
@@ -168,8 +166,8 @@ public class Assets {
         return tenantHttpClientMap.get(environmentTenantIdKey);
     }
 
-    private ObjectMapper getObjectMapper(Map<String, Object> attributes) {
-        return objectMapper;
+    private Mapper getMapper(Map<String, Object> attributes) {
+        return this.mapper;
     }
 
     private String getEnvironmentTenantKey(Map<String, Object> attributes) {

@@ -1,10 +1,11 @@
 package io.archura.platform.internal.configuration;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import io.archura.platform.api.mapper.Mapper;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.Assets;
 import io.archura.platform.internal.Initializer;
 import io.archura.platform.internal.RequestHandler;
+import io.archura.platform.internal.mapper.ObjectMapper;
 import io.archura.platform.internal.server.HttpServer;
 import io.archura.platform.internal.server.Server;
 import lombok.RequiredArgsConstructor;
@@ -30,8 +31,8 @@ public class ApplicationConfiguration {
         return new FilterFunctionExecutor();
     }
 
-    public ObjectMapper objectMapper() {
-        return new ObjectMapper();
+    public Mapper objectMapper() {
+        return new ObjectMapper(new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     public HttpClient httpClient() {
@@ -39,11 +40,11 @@ public class ApplicationConfiguration {
     }
 
     public Assets assets(
-            final ObjectMapper objectMapper,
+            final Mapper mapper,
             final HttpClient httpClient,
             final FilterFunctionExecutor filterFunctionExecutor
     ) {
-        return new Assets(objectMapper, httpClient, filterFunctionExecutor);
+        return new Assets(mapper, httpClient, filterFunctionExecutor);
     }
 
     public Initializer initializer(

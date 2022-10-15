@@ -30,7 +30,7 @@ public class HttpServer implements Server {
             final Assets assets
     ) throws IOException {
         final GlobalConfiguration globalConfiguration = GlobalConfiguration.getInstance();
-        GlobalConfiguration.GlobalConfig config = globalConfiguration.getConfig();
+        final Logger logger = assets.getLogger(Collections.emptyMap());
         final InetSocketAddress serverAddress = new InetSocketAddress(globalConfiguration.getConfig().getHostname(), globalConfiguration.getConfig().getPort());
         localhost = com.sun.net.httpserver.HttpServer.create(serverAddress, globalConfiguration.getConfig().getBacklog());
         localhost.setExecutor(executorService);
@@ -53,15 +53,19 @@ public class HttpServer implements Server {
                 exchange.sendResponseHeaders(response.getStatus(), response.getBytes().length);
                 exchange.getResponseBody().write(response.getBytes());
                 exchange.getResponseBody().close();
-            } catch (Throwable throwable) {
-                final byte[] bytes = throwable.getMessage().getBytes();
-                exchange.sendResponseHeaders(HttpStatusCode.HTTP_INTERNAL_ERROR, bytes.length);
-                exchange.getResponseBody().write(bytes);
-                exchange.getResponseBody().close();
+            } catch (Exception exception) {
+                logger.error("Got exception while sending response back to client, will try to send error, error: %s", exception.getMessage());
+                final byte[] bytes = exception.getMessage().getBytes();
+                try {
+                    exchange.sendResponseHeaders(HttpStatusCode.HTTP_INTERNAL_ERROR, bytes.length);
+                    exchange.getResponseBody().write(bytes);
+                    exchange.getResponseBody().close();
+                } catch (Exception e) {
+                    logger.error("Couldn't send error back to client, error: %s", e.getMessage());
+                }
             }
         });
-        context.getFilters().add(new RequestFilter(config.getRequestTimeout()));
-        final Logger logger = assets.getLogger(Collections.emptyMap());
+        context.getFilters().add(new RequestFilter(globalConfiguration.getConfig().getRequestTimeout()));
         logger.info("HTTP server started on: %s:%s", localhost.getAddress().getHostName(), localhost.getAddress().getPort());
         localhost.start();
     }

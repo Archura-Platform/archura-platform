@@ -2,6 +2,8 @@ package io.archura.platform.internal.server;
 
 import com.sun.net.httpserver.Filter;
 import com.sun.net.httpserver.HttpExchange;
+import io.archura.platform.api.http.HttpStatusCode;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -10,6 +12,7 @@ import java.util.Date;
 import java.util.Timer;
 import java.util.TimerTask;
 
+@Slf4j
 public class RequestFilter extends Filter {
 
     private final Integer requestTimeout;
@@ -28,6 +31,12 @@ public class RequestFilter extends Filter {
             @Override
             public void run() {
                 if (currentThread.isVirtual() && currentThread.isAlive()) {
+                    try {
+                        exchange.sendResponseHeaders(HttpStatusCode.HTTP_GATEWAY_TIMEOUT, 0);
+                        exchange.getResponseBody().close();
+                    } catch (Exception e) {
+                        log.error("Timeout response error: {}", e.getMessage());
+                    }
                     currentThread.interrupt();
                 }
             }
