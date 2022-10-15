@@ -48,13 +48,15 @@ public class CacheConfiguration {
             final ExecutorService executorService,
             final FilterFunctionExecutor filterFunctionExecutor
     ) {
-        final StatefulRedisPubSubConnection<String, String> pubSub = redisClient.connectPubSub();
-        final RedisPubSubCommands<String, String> pubSubCommands = pubSub.sync();
-        final SubscriberRedis pubSubRedis = new SubscriberRedis(pubSubCommands);
+        final StatefulRedisPubSubConnection<String, String> subscribeConnection = redisClient.connectPubSub();
+        final RedisPubSubCommands<String, String> subscribeCommands = subscribeConnection.sync();
+        this.subscriber = new SubscriberRedis(subscribeCommands);
+
+        final StatefulRedisPubSubConnection<String, String> publishConnection = redisClient.connectPubSub();
+        final RedisPubSubCommands<String, String> publishCommands = publishConnection.sync();
+        this.messagePublisher = new RedisMessagePublisher(publishCommands);
         this.publishListener = new PublishListener(executorService, filterFunctionExecutor);
-        pubSub.addListener(this.publishListener);
-        this.messagePublisher = new RedisMessagePublisher(pubSubCommands);
-        this.subscriber = pubSubRedis;
+        publishConnection.addListener(this.publishListener);
     }
 
     public HashCache<String, String> getHashCache() {
