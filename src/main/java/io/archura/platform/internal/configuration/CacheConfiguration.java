@@ -5,7 +5,7 @@ import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.cache.HashCacheRedis;
 import io.archura.platform.internal.publish.MessagePublisher;
 import io.archura.platform.internal.publish.RedisMessagePublisher;
-import io.archura.platform.internal.pubsub.PublishListener;
+import io.archura.platform.internal.pubsub.PubSubMessageListener;
 import io.archura.platform.internal.pubsub.Subscriber;
 import io.archura.platform.internal.pubsub.SubscriberRedis;
 import io.archura.platform.internal.stream.CacheStream;
@@ -24,7 +24,7 @@ public class CacheConfiguration {
     private final String cacheUrl;
     private RedisCommands<String, String> redisCommands;
     private Subscriber subscriber;
-    private PublishListener publishListener;
+    private PubSubMessageListener pubSubMessageListener;
     private MessagePublisher messagePublisher;
 
     public CacheConfiguration(final String cacheUrl) {
@@ -48,15 +48,22 @@ public class CacheConfiguration {
             final ExecutorService executorService,
             final FilterFunctionExecutor filterFunctionExecutor
     ) {
+        createSubscribers(redisClient, executorService, filterFunctionExecutor);
+        createPublishers(redisClient);
+    }
+
+    private void createSubscribers(RedisClient redisClient, ExecutorService executorService, FilterFunctionExecutor filterFunctionExecutor) {
         final StatefulRedisPubSubConnection<String, String> subscribeConnection = redisClient.connectPubSub();
         final RedisPubSubCommands<String, String> subscribeCommands = subscribeConnection.sync();
         this.subscriber = new SubscriberRedis(subscribeCommands);
+        this.pubSubMessageListener = new PubSubMessageListener(executorService, filterFunctionExecutor);
+        subscribeConnection.addListener(this.pubSubMessageListener);
+    }
 
+    private void createPublishers(RedisClient redisClient) {
         final StatefulRedisPubSubConnection<String, String> publishConnection = redisClient.connectPubSub();
         final RedisPubSubCommands<String, String> publishCommands = publishConnection.sync();
         this.messagePublisher = new RedisMessagePublisher(publishCommands);
-        this.publishListener = new PublishListener(executorService, filterFunctionExecutor);
-        publishConnection.addListener(this.publishListener);
     }
 
     public HashCache<String, String> getHashCache() {
@@ -71,8 +78,8 @@ public class CacheConfiguration {
         return this.subscriber;
     }
 
-    public PublishListener getPublishListener() {
-        return publishListener;
+    public PubSubMessageListener getPubSubMessageListener() {
+        return pubSubMessageListener;
     }
 
     public MessagePublisher getMessagePublisher() {

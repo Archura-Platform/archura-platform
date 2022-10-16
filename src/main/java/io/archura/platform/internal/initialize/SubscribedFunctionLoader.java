@@ -11,7 +11,7 @@ import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.configuration.SubscribedConfiguration;
 import io.archura.platform.internal.publish.MessagePublisher;
-import io.archura.platform.internal.pubsub.PublishListener;
+import io.archura.platform.internal.pubsub.PubSubMessageListener;
 import io.archura.platform.internal.pubsub.Subscriber;
 import io.archura.platform.internal.stream.CacheStream;
 import io.lettuce.core.RedisException;
@@ -63,7 +63,7 @@ public class SubscribedFunctionLoader {
         final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
         final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
         final Subscriber subscriber = globalConfiguration.getCacheConfiguration().getSubscriber();
-        final PublishListener publishListener = globalConfiguration.getCacheConfiguration().getPublishListener();
+        final PubSubMessageListener pubSubMessageListener = globalConfiguration.getCacheConfiguration().getPubSubMessageListener();
         final MessagePublisher messagePublisher = globalConfiguration.getCacheConfiguration().getMessagePublisher();
         // traverse configurations and create subscriptions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
@@ -93,7 +93,7 @@ public class SubscribedFunctionLoader {
                         final SubscriptionConsumer subscriptionConsumer = getSubscriptionConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
                         // subscribe consumer to channel
                         final String channel = consumerConfiguration.getChannel();
-                        startSubscriptionConsumerSubscription(environmentName, tenantId, channel, context, subscriptionConsumer, subscriber, publishListener);
+                        startSubscriptionConsumerSubscription(environmentName, tenantId, channel, context, subscriptionConsumer, subscriber, pubSubMessageListener);
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getSubscribedConsumerLogLevel(globalConfig, subscribedConfig, environmentConfig, tenantConfig, consumerConfiguration);
@@ -131,12 +131,12 @@ public class SubscribedFunctionLoader {
             final Context context,
             final SubscriptionConsumer subscribedConsumer,
             final Subscriber subscriber,
-            final PublishListener publishListener) {
+            final PubSubMessageListener pubSubMessageListener) {
         final Logger logger = context.getLogger();
         final String environmentTenantKey = String.format("channel|%s|%s|%s", environment, tenantId, channel);
         try {
             subscriber.subscribe(environmentTenantKey);
-            publishListener.register(environmentTenantKey, context, subscribedConsumer);
+            pubSubMessageListener.register(environmentTenantKey, context, subscribedConsumer);
             logger.debug("Subscription to channel: '%s' created.", environmentTenantKey);
         } catch (RedisException exception) {
             logger.error("Subscription to channel: '%s' could NOT be created.", environmentTenantKey);
