@@ -58,7 +58,7 @@ public class RequestHandler {
                 assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
             }
 
-            String environmentName = String.valueOf(attributes.get(GlobalKeys.REQUEST_ENVIRONMENT.getKey()));
+            final String environmentName = String.valueOf(attributes.get(GlobalKeys.REQUEST_ENVIRONMENT.getKey()));
             final List<Consumer<HttpServerRequest>> environmentPreFilters = getEnvironmentPreFilters(
                     globalConfiguration.getEnvironments(),
                     globalConfiguration.getConfig().getCodeRepositoryUrl(),
@@ -69,11 +69,9 @@ public class RequestHandler {
                 filterFunctionExecutor.execute(request, preFilter);
                 assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
             }
-            /* REMOVE */
-            attributes.put(EnvironmentKeys.REQUEST_TENANT_ID.getKey(), EnvironmentKeys.DEFAULT_TENANT_ID.getKey());
             assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
 
-            String tenantId = String.valueOf(attributes.get(EnvironmentKeys.REQUEST_TENANT_ID.getKey()));
+            final String tenantId = String.valueOf(attributes.get(EnvironmentKeys.REQUEST_TENANT_ID.getKey()));
             final List<Consumer<HttpServerRequest>> tenantPreFilters = getTenantPreFilters(
                     globalConfiguration.getEnvironments(),
                     globalConfiguration.getConfig().getCodeRepositoryUrl(),
@@ -107,18 +105,20 @@ public class RequestHandler {
                     tenantId,
                     routeId
             );
-            assets.getLogger(attributes).debug("Will run TenantFunction: %s", tenantFunctionOptional);
 
             final HttpServerResponse response = new HttpServerResponse();
             if (tenantFunctionOptional.isPresent()) {
                 final Function<HttpServerRequest, HttpServerResponse> tenantFunction = tenantFunctionOptional.get();
+                assets.getLogger(attributes).debug("Will run TenantFunction: %s", tenantFunction);
                 HttpServerResponse httpServerResponse = filterFunctionExecutor.execute(request, tenantFunction);
                 response.setStatus(httpServerResponse.getStatus());
                 response.setBytes(httpServerResponse.getBytes());
                 response.setHeaders(httpServerResponse.getHeaders());
             } else {
                 response.setStatus(HttpStatusCode.HTTP_NOT_FOUND);
-                response.setHeader("X-A-NotFound", String.format("%s-%s-%s", environmentName, tenantId, routeId));
+                final String notFound = String.format("%s-%s-%s", environmentName, tenantId, routeId);
+                response.setHeader("X-A-NotFound", notFound);
+                assets.getLogger(attributes).debug("No tenant function found for requested environment-tenant-path: %s", notFound);
             }
 
             final List<BiConsumer<HttpServerRequest, HttpServerResponse>> routePostFilters = getRoutePostFilters(
@@ -173,7 +173,7 @@ public class RequestHandler {
     ) {
         return preFilterConfigurations
                 .stream()
-                .map(preFilterConfig -> getPreFilter(codeRepositoryUrl, preFilterConfig, "global"))
+                .map(preFilterConfig -> getPreFilter(codeRepositoryUrl, preFilterConfig, "environmentName=global"))
                 .toList();
     }
 
@@ -256,7 +256,7 @@ public class RequestHandler {
         final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
-            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
+            final Object object = assets.createObject(resourceKey, configuration.getName(), configuration.getConfig());
             if (Consumer.class.isAssignableFrom(object.getClass())) {
                 @SuppressWarnings("unchecked") final Consumer<HttpServerRequest> consumer = (Consumer<HttpServerRequest>) object;
                 return consumer;
@@ -305,7 +305,7 @@ public class RequestHandler {
         final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
-            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
+            final Object object = assets.createObject(resourceKey, configuration.getName(), configuration.getConfig());
             if (Function.class.isAssignableFrom(object.getClass())) {
                 @SuppressWarnings("unchecked") final Function<HttpServerRequest, HttpServerResponse> handlerFunction = (Function<HttpServerRequest, HttpServerResponse>) object;
                 return handlerFunction;
@@ -396,7 +396,7 @@ public class RequestHandler {
         String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
-            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
+            final Object object = assets.createObject(resourceKey, configuration.getName(), configuration.getConfig());
             if (BiConsumer.class.isAssignableFrom(object.getClass())) {
                 @SuppressWarnings("unchecked") final BiConsumer<HttpServerRequest, HttpServerResponse> filter = (BiConsumer<HttpServerRequest, HttpServerResponse>) object;
                 return filter;

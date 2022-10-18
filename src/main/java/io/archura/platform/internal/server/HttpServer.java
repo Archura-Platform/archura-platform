@@ -36,7 +36,7 @@ public class HttpServer implements Server {
         localhost.setExecutor(executorService);
         final HttpContext context = localhost.createContext("/", exchange -> {
             try {
-                final Map<String, List<String>> headers = exchange.getResponseHeaders()
+                final Map<String, List<String>> headers = exchange.getRequestHeaders()
                         .entrySet()
                         .stream()
                         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));

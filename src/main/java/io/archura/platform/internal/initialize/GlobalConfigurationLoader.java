@@ -37,8 +37,12 @@ public class GlobalConfigurationLoader {
     }
 
     private GlobalConfiguration createGlobalConfiguration() {
-        final String globalConfigURL = String.format("%s/imperative-shell/global/config.json", configRepositoryUrl);
+        final String globalConfigURL = String.format("%s/global/config.json", configRepositoryUrl);
         final GlobalConfiguration globalConfig = getGlobalConfiguration(globalConfigURL);
+        final String globalImperativeConfigURL = String.format("%s/imperative-shell/global/config.json", configRepositoryUrl);
+        final GlobalConfiguration globalFiltersConfig = getGlobalConfiguration(globalImperativeConfigURL);
+        globalConfig.setPost(globalFiltersConfig.getPost());
+        globalConfig.setPre(globalFiltersConfig.getPre());
         final String redisUrl = globalConfig.getConfig().getRedisUrl();
         final CacheConfiguration cacheConfiguration = createCacheConfiguration(redisUrl);
         globalConfig.setCacheConfiguration(cacheConfiguration);

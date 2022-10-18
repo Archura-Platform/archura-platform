@@ -7,11 +7,13 @@ ARG APP_HOME=/opt/app
 
 RUN groupadd app && useradd -d ${APP_HOME} -s /bin/nologin -g app app
 WORKDIR ${APP_HOME}
-COPY target/archura-platform-0.0.1-SNAPSHOT.jar ${APP_NAME}.jar
+COPY target/ArchuraPlatformApplication-0.0.1-SNAPSHOT.jar ${APP_NAME}.jar
 EXPOSE 8080
 
 USER app
 ENTRYPOINT java -XX:MaxRAMPercentage=100 -XX:MinRAMPercentage=100 \
+-Djava.security.manager=io.archura.platform.securitymanager.ArchuraSecurityManager \
 --enable-preview --add-exports java.base/jdk.internal.reflect=ALL-UNNAMED \
--Ddebug -noverify -Dspring.output.ansi.enabled=always \
+--add-opens java.base/java.security=ALL-UNNAMED \
+--add-opens java.base/java.lang=ALL-UNNAMED \
 ${JAVA_OPTS} -jar ${APP_NAME}.jar

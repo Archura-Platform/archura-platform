@@ -115,7 +115,7 @@ public class ScheduledFunctionLoader {
         final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
-            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
+            final Object object = assets.createObject(resourceKey, configuration.getName(), configuration.getConfig());
             if (ContextConsumer.class.isAssignableFrom(object.getClass())) {
                 return (ContextConsumer) object;
             } else {

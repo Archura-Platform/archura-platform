@@ -68,15 +68,18 @@ public class Assets {
         }
     }
 
-    public Object createObject(String resourceUrl, String resourceKey, String className, JsonNode jsonNode)
-            throws IOException, ReflectiveOperationException {
-        if (isNull(remoteClassMap.get(resourceUrl))) {
+    public Object createObject(
+            final String resourceKey,
+            final String className,
+            final JsonNode jsonNode
+    ) throws IOException, ReflectiveOperationException {
+        if (isNull(remoteClassMap.get(resourceKey))) {
             final URL url = new URL(resourceKey);
             final URLClassLoader classLoader = new URLClassLoader(new URL[]{url}, Thread.currentThread().getContextClassLoader());
             final Class<?> remoteClass = Class.forName(className, true, classLoader);
-            remoteClassMap.put(resourceUrl, remoteClass);
+            remoteClassMap.put(resourceKey, remoteClass);
         }
-        final Object object = remoteClassMap.get(resourceUrl).getDeclaredConstructor().newInstance();
+        final Object object = remoteClassMap.get(resourceKey).getDeclaredConstructor().newInstance();
         configure(jsonNode, object);
         return object;
     }
