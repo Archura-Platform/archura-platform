@@ -1,6 +1,7 @@
 package io.archura.platform.internal.logging;
 
-import io.archura.platform.api.attribute.*;
+import io.archura.platform.api.attribute.EnvironmentKeys;
+import io.archura.platform.api.attribute.GlobalKeys;
 import io.archura.platform.api.logger.Logger;
 import jdk.internal.reflect.Reflection;
 

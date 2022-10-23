@@ -2,11 +2,7 @@ package io.archura.platform.internal;
 
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
-import io.archura.platform.internal.initialize.IIFEFunctionLoader;
-import io.archura.platform.internal.initialize.GlobalConfigurationLoader;
-import io.archura.platform.internal.initialize.ScheduledFunctionLoader;
-import io.archura.platform.internal.initialize.LightStreamFunctionLoader;
-import io.archura.platform.internal.initialize.SubscribedFunctionLoader;
+import io.archura.platform.internal.initialize.*;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.http.HttpClient;
