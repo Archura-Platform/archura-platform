@@ -349,8 +349,6 @@ public class RequestHandler {
             final String environmentName,
             final String tenantId
     ) {
-        final GlobalConfiguration globalConfiguration;
-
         final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = environments.get(environmentName);
         if (isNull(environmentConfiguration)) {
             return Collections.emptyList();

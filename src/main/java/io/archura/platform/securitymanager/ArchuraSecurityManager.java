@@ -32,9 +32,9 @@ public class ArchuraSecurityManager extends SecurityManager {
             checkAccess(SOCKET_MESSAGE, allowedSocketClasses);
         } else if (perm instanceof java.lang.RuntimePermission) {
             final String name = perm.getName();
-            if ("createSecurityManager".equals(name) || "accessDeclaredMembers".equals(name)) {
+            if ("accessDeclaredMembers".equals(name)) {
                 checkAccess(REFLECTION_MESSAGE, allowedReflectionClasses);
-            } else if (name.startsWith("exitVM")) {
+            } else if ("createSecurityManager".equals(name) || name.startsWith("exitVM")) {
                 throw new FilterFunctionSecurityException(RESTRICTED_MESSAGE);
             }
         } else if (perm instanceof java.lang.reflect.ReflectPermission && "suppressAccessChecks".equals(perm.getName())) {
