@@ -13,9 +13,10 @@ import io.archura.platform.api.type.Configurable;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.cache.TenantCache;
+import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.context.RequestContext;
 import io.archura.platform.internal.exception.ConfigurationException;
-import io.archura.platform.internal.logging.LoggerFactory;
+import io.archura.platform.internal.logging.DefaultLogger;
 import io.archura.platform.internal.publish.MessagePublisher;
 import io.archura.platform.internal.publish.TenantPublisher;
 import io.archura.platform.internal.stream.CacheStream;
@@ -34,6 +35,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
+import static io.archura.platform.api.attribute.GlobalKeys.LOG_SERVER_URL;
 import static java.util.Objects.isNull;
 import static java.util.Objects.nonNull;
 
@@ -44,7 +46,6 @@ public class Assets {
     private final Map<String, TenantStream> tenantStreamMap = new HashMap<>();
     private final Map<String, TenantPublisher> tenantPublisherMap = new HashMap<>();
     private final Map<String, Class<?>> remoteClassMap = new HashMap<>();
-    private final Map<String, HttpClient> tenantHttpClientMap = new HashMap<>();
     private final Mapper mapper;
     private final HttpClient defaultHttpClient;
     private final FilterFunctionExecutor filterFunctionExecutor;
@@ -158,15 +159,17 @@ public class Assets {
     }
 
     public Logger getLogger(final Map<String, Object> attributes) {
-        return LoggerFactory.create(attributes);
+        final GlobalConfiguration.GlobalConfig globalConfig = GlobalConfiguration.getInstance().getConfig();
+        final String remoteLogUrl = globalConfig.getRemoteLogUrl();
+        final HashMap<String, Object> map = new HashMap<>(attributes);
+        if (nonNull(remoteLogUrl)) {
+            map.put(LOG_SERVER_URL.getKey(), remoteLogUrl);
+        }
+        return DefaultLogger.create(map, defaultHttpClient);
     }
 
     private HttpClient getHttpClient(final Map<String, Object> attributes) {
-        final String environmentTenantIdKey = getEnvironmentTenantKey(attributes);
-        if (isNull(tenantHttpClientMap.get(environmentTenantIdKey))) {
-            tenantHttpClientMap.put(environmentTenantIdKey, defaultHttpClient);
-        }
-        return tenantHttpClientMap.get(environmentTenantIdKey);
+        return defaultHttpClient;
     }
 
     private Mapper getMapper(Map<String, Object> attributes) {
