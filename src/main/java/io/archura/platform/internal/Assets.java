@@ -9,6 +9,7 @@ import io.archura.platform.api.logger.Logger;
 import io.archura.platform.api.mapper.Mapper;
 import io.archura.platform.api.publish.Publisher;
 import io.archura.platform.api.stream.LightStream;
+import io.archura.platform.api.tracer.Tracer;
 import io.archura.platform.api.type.Configurable;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.cache.HashCache;
@@ -21,6 +22,7 @@ import io.archura.platform.internal.publish.MessagePublisher;
 import io.archura.platform.internal.publish.TenantPublisher;
 import io.archura.platform.internal.stream.CacheStream;
 import io.archura.platform.internal.stream.TenantStream;
+import io.archura.platform.internal.tracer.RemoteTracer;
 import lombok.RequiredArgsConstructor;
 
 import java.io.IOException;
@@ -99,13 +101,21 @@ public class Assets {
             final CacheStream<String, Map<String, String>> cacheStream,
             final MessagePublisher messagePublisher
     ) {
+        final Logger logger = getLogger(attributes);
+        final Optional<Cache> tenantCache = getTenantCache(attributes, hashCache);
+        final Optional<LightStream> tenantStream = getTenantStream(attributes, cacheStream);
+        final Optional<Publisher> publisher = getPublisher(attributes, messagePublisher);
+        final HttpClient httpClient = getHttpClient(attributes);
+        final Mapper contextMapper = getMapper(attributes);
+        final Optional<Tracer> tracer = getTracer(httpClient, mapper, logger);
         final RequestContext context = RequestContext.builder()
-                .cache(getTenantCache(attributes, hashCache))
-                .lightStream(getTenantStream(attributes, cacheStream))
-                .publisher(getPublisher(attributes, messagePublisher))
-                .logger(getLogger(attributes))
-                .httpClient(getHttpClient(attributes))
-                .mapper(getMapper(attributes))
+                .cache(tenantCache)
+                .lightStream(tenantStream)
+                .publisher(publisher)
+                .tracer(tracer)
+                .logger(logger)
+                .httpClient(httpClient)
+                .mapper(contextMapper)
                 .build();
         attributes.put(Context.class.getSimpleName(), context);
     }
@@ -174,6 +184,20 @@ public class Assets {
 
     private Mapper getMapper(Map<String, Object> attributes) {
         return this.mapper;
+    }
+
+    public Optional<Tracer> getTracer(
+            final HttpClient httpClient,
+            final Mapper mapper,
+            final Logger logger
+    ) {
+        final GlobalConfiguration.GlobalConfig globalConfig = GlobalConfiguration.getInstance().getConfig();
+        final String remoteTraceUrl = globalConfig.getRemoteTraceUrl();
+        if (isNull(remoteTraceUrl)) {
+            return Optional.empty();
+        }
+        final RemoteTracer remoteTracer = new RemoteTracer(remoteTraceUrl, httpClient, mapper, logger);
+        return Optional.of(remoteTracer);
     }
 
     private String getEnvironmentTenantKey(Map<String, Object> attributes) {
