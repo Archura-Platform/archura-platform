@@ -96,7 +96,7 @@
                                     <mainClass>io.archura.platform.ArchuraPlatformApplication</mainClass>
                                 </transformer>
                             </transformers>
-                            <finalName>UIPlugin-${project.version}</finalName>
+                            <finalName>ArchuraPlatformApplication-${project.version}</finalName>
                         </configuration>
                     </execution>
                 </executions>

@@ -8,17 +8,17 @@ import java.io.PrintStream;
  */
 public class StreamLogWriter implements LogWriter {
 
-    private final PrintStream stream;
-
-    public StreamLogWriter(PrintStream printStream) {
-        this.stream = printStream;
-    }
+    /**
+     * The default print stream points to the system output.
+     * We can not use a logger since none of the logging solutions implement
+     * a proper solution for Reactor and/or Webflux logging.
+     */
+    private static final PrintStream stream = System.out;
 
     /**
      * Writes the message on a new line using stream.
      *
-     * @param logLevel log level of OFF, ERROR, WARNING, INFO, DEBUG, TRACE, ALL.
-     * @param message  log message.
+     * @param message log message.
      */
     @Override
     public void log(String logLevel, String message) {

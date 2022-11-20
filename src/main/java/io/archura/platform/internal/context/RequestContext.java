@@ -6,6 +6,7 @@ import io.archura.platform.api.logger.Logger;
 import io.archura.platform.api.mapper.Mapper;
 import io.archura.platform.api.publish.Publisher;
 import io.archura.platform.api.stream.LightStream;
+import io.archura.platform.api.tracer.Tracer;
 import lombok.Builder;
 import lombok.Data;
 
@@ -19,6 +20,7 @@ public class RequestContext implements Context {
     private Optional<Cache> cache;
     private Optional<LightStream> lightStream;
     private Optional<Publisher> publisher;
+    private Optional<Tracer> tracer;
     private Logger logger;
     private HttpClient httpClient;
     private Mapper mapper;

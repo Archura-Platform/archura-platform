@@ -2,8 +2,6 @@ package io.archura.platform.internal.initialize;
 
 import io.archura.platform.api.attribute.GlobalKeys;
 import io.archura.platform.api.context.Context;
-import io.archura.platform.api.exception.FunctionIsNotAStreamConsumerException;
-import io.archura.platform.api.exception.ResourceLoadException;
 import io.archura.platform.api.logger.Logger;
 import io.archura.platform.api.type.functionalcore.LightStreamConsumer;
 import io.archura.platform.external.FilterFunctionExecutor;
@@ -11,6 +9,8 @@ import io.archura.platform.internal.Assets;
 import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.configuration.StreamConfiguration;
+import io.archura.platform.internal.exception.FunctionIsNotAStreamConsumerException;
+import io.archura.platform.internal.exception.ResourceLoadException;
 import io.archura.platform.internal.publish.MessagePublisher;
 import io.archura.platform.internal.stream.CacheStream;
 import io.lettuce.core.*;
@@ -114,7 +114,7 @@ public class LightStreamFunctionLoader {
         final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
-            final Object object = assets.createObject(resourceUrl, resourceKey, configuration.getName(), configuration.getConfig());
+            final Object object = assets.createObject(resourceKey, configuration.getName(), configuration.getConfig());
             if (LightStreamConsumer.class.isAssignableFrom(object.getClass())) {
                 return (LightStreamConsumer) object;
             } else {

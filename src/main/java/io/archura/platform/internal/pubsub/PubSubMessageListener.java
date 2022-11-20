@@ -15,13 +15,13 @@ import java.util.concurrent.ExecutorService;
 
 import static java.util.Objects.isNull;
 
-public class PublishListener extends RedisPubSubAdapter<String, String> {
+public class PubSubMessageListener extends RedisPubSubAdapter<String, String> {
 
     private final ExecutorService executorService;
     private final FilterFunctionExecutor filterFunctionExecutor;
     private final Map<String, List<ConsumerContext>> channelSubscribers = new HashMap<>();
 
-    public PublishListener(final ExecutorService executorService, final FilterFunctionExecutor filterFunctionExecutor) {
+    public PubSubMessageListener(final ExecutorService executorService, final FilterFunctionExecutor filterFunctionExecutor) {
         this.executorService = executorService;
         this.filterFunctionExecutor = filterFunctionExecutor;
     }

@@ -33,6 +33,8 @@ public class GlobalConfiguration {
 
     @Data
     public static class GlobalConfig extends Configuration {
+        private String remoteLogUrl;
+        private String remoteTraceUrl;
         private String redisUrl;
         private String codeRepositoryUrl;
         private String archuraPlatformToken;

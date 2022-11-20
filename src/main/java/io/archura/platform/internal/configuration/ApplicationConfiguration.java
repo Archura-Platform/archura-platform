@@ -36,7 +36,10 @@ public class ApplicationConfiguration {
     }
 
     public HttpClient httpClient() {
-        return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        return HttpClient.newBuilder()
+                .executor(Executors.newVirtualThreadPerTaskExecutor())
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
     }
 
     public Assets assets(

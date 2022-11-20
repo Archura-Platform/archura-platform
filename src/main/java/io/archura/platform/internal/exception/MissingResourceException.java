@@ -1,0 +1,7 @@
+package io.archura.platform.internal.exception;
+
+public class MissingResourceException extends RuntimeException {
+    public MissingResourceException(String message) {
+        super(message);
+    }
+}

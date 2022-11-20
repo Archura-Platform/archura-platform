@@ -10,7 +10,9 @@ import io.archura.platform.api.type.functionalcore.SubscriptionConsumer;
 
 import java.util.Collections;
 import java.util.Map;
-import java.util.function.*;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 public class FilterFunctionExecutor {
 
