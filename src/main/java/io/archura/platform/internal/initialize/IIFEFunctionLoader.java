@@ -5,13 +5,11 @@ import io.archura.platform.api.context.Context;
 import io.archura.platform.api.type.functionalcore.ContextConsumer;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.Assets;
-import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.configuration.IIFEConfiguration;
+import io.archura.platform.internal.context.ContextSupport;
 import io.archura.platform.internal.exception.FunctionIsNotAContextConsumerException;
 import io.archura.platform.internal.exception.ResourceLoadException;
-import io.archura.platform.internal.publish.MessagePublisher;
-import io.archura.platform.internal.stream.CacheStream;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.http.HttpClient;
@@ -64,12 +62,9 @@ public class IIFEFunctionLoader {
     }
 
     private void executeIIFEFunctions(GlobalConfiguration globalConfiguration) {
-        // get commands
-        final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
-        final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
-        final MessagePublisher messagePublisher = globalConfiguration.getCacheConfiguration().getMessagePublisher();
         // traverse configurations and execute functions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
+        final ContextSupport contextSupport = assets.getContextSupport(globalConfiguration.getCacheConfiguration());
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
         final IIFEConfiguration.Configuration iifeConfig = globalConfiguration.getIifeConfiguration().getConfig();
         final Map<String, IIFEConfiguration.EnvironmentConfiguration> environments = globalConfiguration.getIifeConfiguration().getEnvironments();
@@ -90,7 +85,7 @@ public class IIFEFunctionLoader {
                     try {
                         // create context
                         final String logLevel = getIIFELogLevel(globalConfig, iifeConfig, environmentConfig, tenantConfig, functionConfiguration);
-                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
+                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, contextSupport);
                         // create function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final ContextConsumer contextConsumer = getIIFEFunction(codeRepositoryUrl, functionConfiguration, query);
@@ -98,7 +93,7 @@ public class IIFEFunctionLoader {
                         executorService.submit(() -> filterFunctionExecutor.execute(context, contextConsumer));
                     } catch (Exception e) {
                         final String logLevel = getIIFELogLevel(globalConfig, iifeConfig, environmentConfig, tenantConfig, functionConfiguration);
-                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
+                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, contextSupport);
                         context.getLogger().error("Error occurred while running IIFE function: %s - %s, error: %s", functionConfiguration.getName(), functionConfiguration.getVersion(), e.getMessage());
                     }
                 }

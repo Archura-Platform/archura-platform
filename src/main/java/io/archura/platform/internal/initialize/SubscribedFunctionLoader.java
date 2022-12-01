@@ -5,15 +5,13 @@ import io.archura.platform.api.context.Context;
 import io.archura.platform.api.logger.Logger;
 import io.archura.platform.api.type.functionalcore.SubscriptionConsumer;
 import io.archura.platform.internal.Assets;
-import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.configuration.SubscribedConfiguration;
+import io.archura.platform.internal.context.ContextSupport;
 import io.archura.platform.internal.exception.FunctionIsNotASubscriptionConsumerException;
 import io.archura.platform.internal.exception.ResourceLoadException;
-import io.archura.platform.internal.publish.MessagePublisher;
 import io.archura.platform.internal.pubsub.PubSubMessageListener;
 import io.archura.platform.internal.pubsub.Subscriber;
-import io.archura.platform.internal.stream.CacheStream;
 import io.lettuce.core.RedisException;
 
 import java.net.http.HttpClient;
@@ -60,13 +58,11 @@ public class SubscribedFunctionLoader {
 
     private void executeSubscribedFunctions(final GlobalConfiguration globalConfiguration) {
         // get commands
-        final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
-        final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
         final Subscriber subscriber = globalConfiguration.getCacheConfiguration().getSubscriber();
         final PubSubMessageListener pubSubMessageListener = globalConfiguration.getCacheConfiguration().getPubSubMessageListener();
-        final MessagePublisher messagePublisher = globalConfiguration.getCacheConfiguration().getMessagePublisher();
         // traverse configurations and create subscriptions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
+        final ContextSupport contextSupport = assets.getContextSupport(globalConfiguration.getCacheConfiguration());
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
         final SubscribedConfiguration.Configuration subscribedConfig = globalConfiguration.getSubscribedConfiguration().getConfig();
         final Map<String, SubscribedConfiguration.EnvironmentConfiguration> environments = globalConfiguration.getSubscribedConfiguration().getEnvironments();
@@ -87,7 +83,7 @@ public class SubscribedFunctionLoader {
                     try {
                         // create context
                         final String logLevel = getSubscribedConsumerLogLevel(globalConfig, subscribedConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
+                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, contextSupport);
                         // create consumer function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final SubscriptionConsumer subscriptionConsumer = getSubscriptionConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
@@ -97,7 +93,7 @@ public class SubscribedFunctionLoader {
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getSubscribedConsumerLogLevel(globalConfig, subscribedConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
+                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, contextSupport);
                         context.getLogger().error("Error occurred while creating Subscribed function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
                     }
                 }

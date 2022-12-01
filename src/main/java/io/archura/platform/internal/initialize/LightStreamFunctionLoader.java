@@ -6,12 +6,11 @@ import io.archura.platform.api.logger.Logger;
 import io.archura.platform.api.type.functionalcore.LightStreamConsumer;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.Assets;
-import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
 import io.archura.platform.internal.configuration.StreamConfiguration;
+import io.archura.platform.internal.context.ContextSupport;
 import io.archura.platform.internal.exception.FunctionIsNotAStreamConsumerException;
 import io.archura.platform.internal.exception.ResourceLoadException;
-import io.archura.platform.internal.publish.MessagePublisher;
 import io.archura.platform.internal.stream.CacheStream;
 import io.lettuce.core.*;
 
@@ -62,10 +61,7 @@ public class LightStreamFunctionLoader {
 
     private void executeStreamFunctions(final GlobalConfiguration globalConfiguration) {
         // get commands
-        final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
-        final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
-        final MessagePublisher messagePublisher = globalConfiguration.getCacheConfiguration().getMessagePublisher();
-
+        final ContextSupport contextSupport = assets.getContextSupport(globalConfiguration.getCacheConfiguration());
         // traverse configurations and create subscriptions
         final GlobalConfiguration.GlobalConfig globalConfig = globalConfiguration.getConfig();
         final String codeRepositoryUrl = globalConfig.getCodeRepositoryUrl();
@@ -88,17 +84,17 @@ public class LightStreamFunctionLoader {
                     try {
                         // create context
                         final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
+                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, contextSupport);
                         // create consumer function
                         final String query = String.format("environmentName=%s&tenantId=%s", environmentName, tenantId);
                         final LightStreamConsumer lightStreamConsumer = getStreamConsumerFunction(codeRepositoryUrl, consumerConfiguration, query);
                         // start/register stream function subscription
                         final String topic = consumerConfiguration.getTopic();
-                        startStreamConsumerSubscription(environmentName, tenantId, topic, context, lightStreamConsumer, cacheStream);
+                        startStreamConsumerSubscription(environmentName, tenantId, topic, context, lightStreamConsumer, contextSupport.getCacheStream());
                     } catch (Exception e) {
                         // create context
                         final String logLevel = getStreamConsumerLogLevel(globalConfig, streamConfig, environmentConfig, tenantConfig, consumerConfiguration);
-                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, hashCache, cacheStream, messagePublisher);
+                        final Context context = assets.createContextForEnvironmentAndTenant(environmentName, tenantId, logLevel, contextSupport);
                         context.getLogger().error("Error occurred while creating Stream function: %s - %s, error: %s", consumerConfiguration.getName(), consumerConfiguration.getVersion(), e.getMessage());
                     }
                 }

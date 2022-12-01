@@ -3,7 +3,6 @@ package io.archura.platform.internal.tracer;
 import io.archura.platform.api.logger.Logger;
 import io.archura.platform.api.mapper.Mapper;
 import io.archura.platform.api.tracer.Tracer;
-import io.archura.platform.internal.logging.DefaultLogger;
 import jdk.internal.reflect.Reflection;
 
 import java.net.URI;
@@ -15,11 +14,12 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 import static java.util.Objects.isNull;
+import static java.util.Objects.nonNull;
 
 public class RemoteTracer implements Tracer {
 
     static {
-        Reflection.registerFieldsToFilter(DefaultLogger.class, Set.of("httpClient", "mapper", "logger", "builder"));
+        Reflection.registerFieldsToFilter(RemoteTracer.class, Set.of("httpClient", "mapper", "logger", "builder"));
     }
 
     private final HttpClient httpClient;
@@ -42,17 +42,19 @@ public class RemoteTracer implements Tracer {
     @Override
     public void trace(final Map<String, Object> attributes) {
         try {
-            final String traceBody = mapper.writeValueAsString(attributes);
-            final HttpRequest.BodyPublisher bodyPublisher = HttpRequest.BodyPublishers.ofString(traceBody);
-            final HttpRequest httpRequest = builder.POST(bodyPublisher).build();
-            final CompletableFuture<HttpResponse<Void>> response = httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.discarding());
-            response.thenAcceptAsync(voidHttpResponse -> {
-                if (isNull(voidHttpResponse)) {
-                    logger.error("No response from trace server, could not send trace attributes: %s", attributes);
-                } else if (voidHttpResponse.statusCode() != 201) {
-                    logger.error("Trace server could not write trace attributes: %s", attributes);
-                }
-            });
+            if (nonNull(attributes) && !attributes.isEmpty()) {
+                final String traceBody = mapper.writeValueAsString(attributes);
+                final HttpRequest.BodyPublisher bodyPublisher = HttpRequest.BodyPublishers.ofString(traceBody);
+                final HttpRequest httpRequest = builder.POST(bodyPublisher).build();
+                final CompletableFuture<HttpResponse<Void>> response = httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.discarding());
+                response.thenAcceptAsync(voidHttpResponse -> {
+                    if (isNull(voidHttpResponse)) {
+                        logger.error("No response from trace server, could not send trace attributes: %s", attributes);
+                    } else if (voidHttpResponse.statusCode() != 201) {
+                        logger.error("Trace server could not write trace attributes: %s", attributes);
+                    }
+                });
+            }
         } catch (Exception e) {
             logger.error("Got exception while preparing/send trace attributes: %s", attributes);
         }

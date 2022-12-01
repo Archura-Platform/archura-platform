@@ -14,7 +14,9 @@ import io.archura.platform.api.type.Configurable;
 import io.archura.platform.external.FilterFunctionExecutor;
 import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.cache.TenantCache;
+import io.archura.platform.internal.configuration.CacheConfiguration;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
+import io.archura.platform.internal.context.ContextSupport;
 import io.archura.platform.internal.context.RequestContext;
 import io.archura.platform.internal.exception.ConfigurationException;
 import io.archura.platform.internal.logging.DefaultLogger;
@@ -97,14 +99,12 @@ public class Assets {
 
     public void buildContext(
             final Map<String, Object> attributes,
-            final HashCache<String, String> hashCache,
-            final CacheStream<String, Map<String, String>> cacheStream,
-            final MessagePublisher messagePublisher
+            final ContextSupport contextSupport
     ) {
         final Logger logger = getLogger(attributes);
-        final Optional<Cache> tenantCache = getTenantCache(attributes, hashCache);
-        final Optional<LightStream> tenantStream = getTenantStream(attributes, cacheStream);
-        final Optional<Publisher> publisher = getPublisher(attributes, messagePublisher);
+        final Optional<Cache> tenantCache = getTenantCache(attributes, contextSupport.getHashCache());
+        final Optional<LightStream> tenantStream = getTenantStream(attributes, contextSupport.getCacheStream());
+        final Optional<Publisher> publisher = getPublisher(attributes, contextSupport.getMessagePublisher());
         final HttpClient httpClient = getHttpClient(attributes);
         final Mapper contextMapper = getMapper(attributes);
         final Optional<Tracer> tracer = getTracer(httpClient, mapper, logger);
@@ -210,9 +210,7 @@ public class Assets {
             final String environmentName,
             final String tenantId,
             final String logLevel,
-            final HashCache<String, String> hashCache,
-            final CacheStream<String, Map<String, String>> cacheStream,
-            final MessagePublisher messagePublisher
+            final ContextSupport contextSupport
     ) {
         final HashMap<String, Object> attributes = new HashMap<>();
         attributes.put(GlobalKeys.REQUEST_ENVIRONMENT.getKey(), environmentName);
@@ -220,8 +218,18 @@ public class Assets {
         if (nonNull(logLevel)) {
             attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), logLevel);
         }
-        buildContext(attributes, hashCache, cacheStream, messagePublisher);
+        buildContext(attributes, contextSupport);
         return (Context) attributes.get(Context.class.getSimpleName());
     }
 
+    public ContextSupport getContextSupport(final CacheConfiguration cacheConfiguration) {
+        final HashCache<String, String> hashCache = cacheConfiguration.getHashCache();
+        final CacheStream<String, Map<String, String>> cacheStream = cacheConfiguration.getCacheStream();
+        final MessagePublisher messagePublisher = cacheConfiguration.getMessagePublisher();
+        return ContextSupport.builder()
+                .hashCache(hashCache)
+                .cacheStream(cacheStream)
+                .messagePublisher(messagePublisher)
+                .build();
+    }
 }

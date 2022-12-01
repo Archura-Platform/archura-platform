@@ -8,11 +8,9 @@ import io.archura.platform.api.http.HttpServerResponse;
 import io.archura.platform.api.http.HttpStatusCode;
 import io.archura.platform.api.logger.Logger;
 import io.archura.platform.external.FilterFunctionExecutor;
-import io.archura.platform.internal.cache.HashCache;
 import io.archura.platform.internal.configuration.GlobalConfiguration;
+import io.archura.platform.internal.context.ContextSupport;
 import io.archura.platform.internal.exception.*;
-import io.archura.platform.internal.publish.MessagePublisher;
-import io.archura.platform.internal.stream.CacheStream;
 import lombok.RequiredArgsConstructor;
 
 import java.io.ByteArrayOutputStream;
@@ -39,131 +37,266 @@ public class RequestHandler {
     public HttpServerResponse handle(final HttpServerRequest request) {
         try {
             final GlobalConfiguration globalConfiguration = GlobalConfiguration.getInstance();
-            final String logLevel = globalConfiguration.getConfig().getLogLevel();
-            final HashCache<String, String> hashCache = globalConfiguration.getCacheConfiguration().getHashCache();
-            final CacheStream<String, Map<String, String>> cacheStream = globalConfiguration.getCacheConfiguration().getCacheStream();
-            final MessagePublisher messagePublisher = globalConfiguration.getCacheConfiguration().getMessagePublisher();
+            final ContextSupport contextSupport = assets.getContextSupport(globalConfiguration.getCacheConfiguration());
+            final Map<String, Object> attributes = createInitialAttributes(request, globalConfiguration, contextSupport);
 
-            final Map<String, Object> attributes = request.getAttributes();
-            attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), logLevel);
-            assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
-
-            final List<Consumer<HttpServerRequest>> globalPreFilters = getGlobalPreFilters(
+            runGlobalPreFilters(
+                    request,
+                    contextSupport,
+                    attributes,
                     globalConfiguration.getPre(),
                     globalConfiguration.getConfig().getCodeRepositoryUrl()
             );
-            for (Consumer<HttpServerRequest> preFilter : globalPreFilters) {
-                assets.getLogger(attributes).debug("Will run global PreFilter: %s", preFilter.getClass().getSimpleName());
-                filterFunctionExecutor.execute(request, preFilter);
-                assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
-            }
 
-            final String environmentName = String.valueOf(attributes.get(GlobalKeys.REQUEST_ENVIRONMENT.getKey()));
-            final List<Consumer<HttpServerRequest>> environmentPreFilters = getEnvironmentPreFilters(
+            final String environmentName = runEnvironmentPreFilters(
+                    request,
+                    contextSupport,
+                    attributes,
                     globalConfiguration.getEnvironments(),
-                    globalConfiguration.getConfig().getCodeRepositoryUrl(),
-                    environmentName
+                    globalConfiguration.getConfig().getCodeRepositoryUrl()
             );
-            for (Consumer<HttpServerRequest> preFilter : environmentPreFilters) {
-                assets.getLogger(attributes).debug("Will run environment PreFilter: %s", preFilter.getClass().getSimpleName());
-                filterFunctionExecutor.execute(request, preFilter);
-                assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
-            }
-            assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
 
-            final String tenantId = String.valueOf(attributes.get(EnvironmentKeys.REQUEST_TENANT_ID.getKey()));
-            final List<Consumer<HttpServerRequest>> tenantPreFilters = getTenantPreFilters(
-                    globalConfiguration.getEnvironments(),
-                    globalConfiguration.getConfig().getCodeRepositoryUrl(),
+            final String tenantId = runTenantPreFilters(
+                    request,
+                    contextSupport,
+                    attributes,
                     environmentName,
-                    tenantId
-            );
-            for (Consumer<HttpServerRequest> preFilter : tenantPreFilters) {
-                assets.getLogger(attributes).debug("Will run tenant PreFilter: %s", preFilter.getClass().getSimpleName());
-                filterFunctionExecutor.execute(request, preFilter);
-                assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
-            }
-
-            final String routeId = String.valueOf(request.getAttributes().getOrDefault(TenantKeys.ROUTE_ID.getKey(), TenantKeys.CATCH_ALL_ROUTE_KEY.getKey()));
-            final List<Consumer<HttpServerRequest>> routePreFilters = getRoutePreFilters(
                     globalConfiguration.getEnvironments(),
-                    globalConfiguration.getConfig().getCodeRepositoryUrl(),
+                    globalConfiguration.getConfig().getCodeRepositoryUrl()
+            );
+
+            final String routeId = runRoutePreFilters(
+                    request,
+                    contextSupport,
+                    attributes,
+                    environmentName,
+                    tenantId, globalConfiguration.getEnvironments(), globalConfiguration.getConfig().getCodeRepositoryUrl()
+            );
+
+            final HttpServerResponse response = runRequestFunction(
+                    request,
+                    attributes,
                     environmentName,
                     tenantId,
-                    routeId
+                    routeId, globalConfiguration.getEnvironments(), globalConfiguration.getConfig().getCodeRepositoryUrl()
             );
-            for (Consumer<HttpServerRequest> preFilter : routePreFilters) {
-                assets.getLogger(attributes).debug("Will run route PreFilter: %s", preFilter.getClass().getSimpleName());
-                filterFunctionExecutor.execute(request, preFilter);
-                assets.buildContext(attributes, hashCache, cacheStream, messagePublisher);
-            }
 
-            final Optional<Function<HttpServerRequest, HttpServerResponse>> tenantFunctionOptional = getTenantFunctions(
-                    globalConfiguration.getEnvironments(),
-                    globalConfiguration.getConfig().getCodeRepositoryUrl(),
+            runRoutePostFilters(
+                    request,
+                    globalConfiguration,
+                    attributes,
                     environmentName,
                     tenantId,
-                    routeId
+                    routeId,
+                    response
             );
 
-            final HttpServerResponse response = new HttpServerResponse();
-            if (tenantFunctionOptional.isPresent()) {
-                final Function<HttpServerRequest, HttpServerResponse> tenantFunction = tenantFunctionOptional.get();
-                assets.getLogger(attributes).debug("Will run TenantFunction: %s", tenantFunction);
-                HttpServerResponse httpServerResponse = filterFunctionExecutor.execute(request, tenantFunction);
-                response.setStatus(httpServerResponse.getStatus());
-                response.setBytes(httpServerResponse.getBytes());
-                response.setHeaders(httpServerResponse.getHeaders());
-            } else {
-                response.setStatus(HttpStatusCode.HTTP_NOT_FOUND);
-                final String notFound = String.format("%s-%s-%s", environmentName, tenantId, routeId);
-                response.setHeader("X-A-NotFound", notFound);
-                assets.getLogger(attributes).debug("No tenant function found for requested environment-tenant-path: %s", notFound);
-            }
-
-            final List<BiConsumer<HttpServerRequest, HttpServerResponse>> routePostFilters = getRoutePostFilters(
-                    globalConfiguration.getEnvironments(),
-                    globalConfiguration.getConfig().getCodeRepositoryUrl(),
+            runTenantPostFilters(
+                    request,
+                    attributes,
                     environmentName,
                     tenantId,
-                    routeId
-            );
-            for (BiConsumer<HttpServerRequest, HttpServerResponse> postFilter : routePostFilters) {
-                assets.getLogger(attributes).debug("Will run route PostFilter: %s", postFilter.getClass().getSimpleName());
-                filterFunctionExecutor.execute(request, response, postFilter);
-            }
-
-            final List<BiConsumer<HttpServerRequest, HttpServerResponse>> tenantPostFilters = getTenantPostFilters(
+                    response,
                     globalConfiguration.getEnvironments(),
-                    globalConfiguration.getConfig().getCodeRepositoryUrl(),
+                    globalConfiguration.getConfig().getCodeRepositoryUrl()
+            );
+
+            runEnvironmentPostFilters(
+                    request,
+                    attributes,
                     environmentName,
-                    tenantId
-            );
-            for (BiConsumer<HttpServerRequest, HttpServerResponse> postFilter : tenantPostFilters) {
-                assets.getLogger(attributes).debug("Will run tenant PostFilter: %s", postFilter.getClass().getSimpleName());
-                filterFunctionExecutor.execute(request, response, postFilter);
-            }
-
-            final List<BiConsumer<HttpServerRequest, HttpServerResponse>> environmentPostFilters = getEnvironmentPostFilters(
+                    response,
                     globalConfiguration.getEnvironments(),
-                    globalConfiguration.getConfig().getCodeRepositoryUrl(),
-                    environmentName
+                    globalConfiguration.getConfig().getCodeRepositoryUrl()
             );
-            for (BiConsumer<HttpServerRequest, HttpServerResponse> postFilter : environmentPostFilters) {
-                assets.getLogger(attributes).debug("Will run environment PostFilter: %s", postFilter.getClass().getSimpleName());
-                filterFunctionExecutor.execute(request, response, postFilter);
-            }
-            final List<BiConsumer<HttpServerRequest, HttpServerResponse>> globalPostFilters = getGlobalPostFilters(
+
+            runGlobalPostFilters(
+                    request,
+                    attributes,
+                    response,
                     globalConfiguration.getPost(),
                     globalConfiguration.getConfig().getCodeRepositoryUrl()
             );
-            for (BiConsumer<HttpServerRequest, HttpServerResponse> postFilter : globalPostFilters) {
-                assets.getLogger(attributes).debug("Will run global PostFilter: %s", postFilter.getClass().getSimpleName());
-                filterFunctionExecutor.execute(request, response, postFilter);
-            }
+
             return response;
         } catch (Exception e) {
             return this.getErrorResponse(e, request);
+        }
+    }
+
+    private Map<String, Object> createInitialAttributes(
+            final HttpServerRequest request,
+            final GlobalConfiguration globalConfiguration,
+            final ContextSupport contextSupport
+    ) {
+        final Map<String, Object> attributes = request.getAttributes();
+        final String logLevel = globalConfiguration.getConfig().getLogLevel();
+        attributes.put(GlobalKeys.REQUEST_LOG_LEVEL.getKey(), logLevel);
+        assets.buildContext(attributes, contextSupport);
+        return attributes;
+    }
+
+    private void runGlobalPreFilters(
+            final HttpServerRequest request,
+            final ContextSupport contextSupport,
+            final Map<String, Object> attributes,
+            final List<GlobalConfiguration.PreFilterConfiguration> preFilterConfigurations,
+            final String codeRepositoryUrl
+    ) {
+        final List<Consumer<HttpServerRequest>> globalPreFilters = getGlobalPreFilters(preFilterConfigurations, codeRepositoryUrl);
+        for (Consumer<HttpServerRequest> preFilter : globalPreFilters) {
+            assets.getLogger(attributes).debug("Will run global PreFilter: %s", preFilter.getClass().getSimpleName());
+            filterFunctionExecutor.execute(request, preFilter);
+            assets.buildContext(attributes, contextSupport);
+        }
+    }
+
+    private String runEnvironmentPreFilters(
+            final HttpServerRequest request,
+            final ContextSupport contextSupport,
+            final Map<String, Object> attributes,
+            final Map<String, GlobalConfiguration.EnvironmentConfiguration> environments,
+            final String codeRepositoryUrl
+    ) {
+        final String environmentName = String.valueOf(attributes.get(GlobalKeys.REQUEST_ENVIRONMENT.getKey()));
+        final List<Consumer<HttpServerRequest>> environmentPreFilters = getEnvironmentPreFilters(environments, codeRepositoryUrl, environmentName);
+        for (Consumer<HttpServerRequest> preFilter : environmentPreFilters) {
+            assets.getLogger(attributes).debug("Will run environment PreFilter: %s", preFilter.getClass().getSimpleName());
+            filterFunctionExecutor.execute(request, preFilter);
+            assets.buildContext(attributes, contextSupport);
+        }
+        return environmentName;
+    }
+
+    private String runTenantPreFilters(
+            final HttpServerRequest request,
+            final ContextSupport contextSupport,
+            final Map<String, Object> attributes,
+            final String environmentName,
+            final Map<String, GlobalConfiguration.EnvironmentConfiguration> environments,
+            final String codeRepositoryUrl
+    ) {
+        final String tenantId = String.valueOf(attributes.get(EnvironmentKeys.REQUEST_TENANT_ID.getKey()));
+        final List<Consumer<HttpServerRequest>> tenantPreFilters = getTenantPreFilters(environments, codeRepositoryUrl, environmentName, tenantId);
+        for (Consumer<HttpServerRequest> preFilter : tenantPreFilters) {
+            assets.getLogger(attributes).debug("Will run tenant PreFilter: %s", preFilter.getClass().getSimpleName());
+            filterFunctionExecutor.execute(request, preFilter);
+            assets.buildContext(attributes, contextSupport);
+        }
+        return tenantId;
+    }
+
+    private String runRoutePreFilters(
+            final HttpServerRequest request,
+            final ContextSupport contextSupport,
+            final Map<String, Object> attributes,
+            final String environmentName,
+            final String tenantId,
+            final Map<String, GlobalConfiguration.EnvironmentConfiguration> environments,
+            final String codeRepositoryUrl
+    ) {
+        final String routeId = String.valueOf(request.getAttributes().getOrDefault(TenantKeys.ROUTE_ID.getKey(), TenantKeys.CATCH_ALL_ROUTE_KEY.getKey()));
+        final List<Consumer<HttpServerRequest>> routePreFilters = getRoutePreFilters(environments, codeRepositoryUrl, environmentName, tenantId, routeId);
+        for (Consumer<HttpServerRequest> preFilter : routePreFilters) {
+            assets.getLogger(attributes).debug("Will run route PreFilter: %s", preFilter.getClass().getSimpleName());
+            filterFunctionExecutor.execute(request, preFilter);
+            assets.buildContext(attributes, contextSupport);
+        }
+        return routeId;
+    }
+
+    private HttpServerResponse runRequestFunction(
+            final HttpServerRequest request,
+            final Map<String, Object> attributes,
+            final String environmentName,
+            final String tenantId,
+            final String routeId,
+            final Map<String, GlobalConfiguration.EnvironmentConfiguration> environments,
+            final String codeRepositoryUrl
+    ) {
+        final Optional<Function<HttpServerRequest, HttpServerResponse>> tenantFunctionOptional = getTenantFunctions(environments, codeRepositoryUrl, environmentName, tenantId, routeId);
+        final HttpServerResponse response = new HttpServerResponse();
+        if (tenantFunctionOptional.isPresent()) {
+            final Function<HttpServerRequest, HttpServerResponse> tenantFunction = tenantFunctionOptional.get();
+            assets.getLogger(attributes).debug("Will run TenantFunction: %s", tenantFunction);
+            final HttpServerResponse httpServerResponse = filterFunctionExecutor.execute(request, tenantFunction);
+            response.setStatus(httpServerResponse.getStatus());
+            response.setBytes(httpServerResponse.getBytes());
+            response.setHeaders(httpServerResponse.getHeaders());
+        } else {
+            response.setStatus(HttpStatusCode.HTTP_NOT_FOUND);
+            final String notFound = String.format("%s-%s-%s", environmentName, tenantId, routeId);
+            response.setHeader("X-A-NotFound", notFound);
+            assets.getLogger(attributes).debug("No tenant function found for requested environment-tenant-path: %s", notFound);
+        }
+        return response;
+    }
+
+    private void runRoutePostFilters(HttpServerRequest request, GlobalConfiguration globalConfiguration, Map<String, Object> attributes, String environmentName, String tenantId, String routeId, HttpServerResponse response) {
+        final List<BiConsumer<HttpServerRequest, HttpServerResponse>> routePostFilters = getRoutePostFilters(
+                globalConfiguration.getEnvironments(),
+                globalConfiguration.getConfig().getCodeRepositoryUrl(),
+                environmentName,
+                tenantId,
+                routeId
+        );
+        for (BiConsumer<HttpServerRequest, HttpServerResponse> postFilter : routePostFilters) {
+            assets.getLogger(attributes).debug("Will run route PostFilter: %s", postFilter.getClass().getSimpleName());
+            filterFunctionExecutor.execute(request, response, postFilter);
+        }
+    }
+
+    private void runTenantPostFilters(
+            final HttpServerRequest request,
+            final Map<String, Object> attributes,
+            final String environmentName,
+            final String tenantId,
+            final HttpServerResponse response,
+            final Map<String, GlobalConfiguration.EnvironmentConfiguration> environments,
+            final String codeRepositoryUrl
+    ) {
+        final List<BiConsumer<HttpServerRequest, HttpServerResponse>> tenantPostFilters = getTenantPostFilters(
+                environments,
+                codeRepositoryUrl,
+                environmentName,
+                tenantId
+        );
+        for (BiConsumer<HttpServerRequest, HttpServerResponse> postFilter : tenantPostFilters) {
+            assets.getLogger(attributes).debug("Will run tenant PostFilter: %s", postFilter.getClass().getSimpleName());
+            filterFunctionExecutor.execute(request, response, postFilter);
+        }
+    }
+
+    private void runEnvironmentPostFilters(
+            final HttpServerRequest request,
+            final Map<String, Object> attributes,
+            final String environmentName,
+            final HttpServerResponse response,
+            final Map<String, GlobalConfiguration.EnvironmentConfiguration> environments,
+            final String codeRepositoryUrl
+    ) {
+        final List<BiConsumer<HttpServerRequest, HttpServerResponse>> environmentPostFilters = getEnvironmentPostFilters(
+                environments,
+                codeRepositoryUrl,
+                environmentName
+        );
+        for (BiConsumer<HttpServerRequest, HttpServerResponse> postFilter : environmentPostFilters) {
+            assets.getLogger(attributes).debug("Will run environment PostFilter: %s", postFilter.getClass().getSimpleName());
+            filterFunctionExecutor.execute(request, response, postFilter);
+        }
+    }
+
+    private void runGlobalPostFilters(
+            final HttpServerRequest request,
+            final Map<String, Object> attributes,
+            final HttpServerResponse response,
+            final List<GlobalConfiguration.PostFilterConfiguration> post,
+            final String codeRepositoryUrl
+    ) {
+        final List<BiConsumer<HttpServerRequest, HttpServerResponse>> globalPostFilters = getGlobalPostFilters(post, codeRepositoryUrl);
+        for (BiConsumer<HttpServerRequest, HttpServerResponse> postFilter : globalPostFilters) {
+            assets.getLogger(attributes).debug("Will run global PostFilter: %s", postFilter.getClass().getSimpleName());
+            filterFunctionExecutor.execute(request, response, postFilter);
         }
     }
 
@@ -184,8 +317,8 @@ public class RequestHandler {
     ) {
         final GlobalConfiguration.EnvironmentConfiguration environmentConfiguration = environments.get(environmentName);
         if (isNull(environmentConfiguration)) {
-            String environmentConfigURL = String.format("%s/imperative-shell/environments/%s/config.json", configRepositoryUrl, environmentName);
-            GlobalConfiguration.EnvironmentConfiguration environmentConfig = getEnvironmentConfiguration(environmentConfigURL);
+            final String environmentConfigURL = String.format("%s/imperative-shell/environments/%s/config.json", configRepositoryUrl, environmentName);
+            final GlobalConfiguration.EnvironmentConfiguration environmentConfig = getEnvironmentConfiguration(environmentConfigURL);
             environments.put(environmentName, environmentConfig);
         }
         return environments.get(environmentName)
@@ -211,8 +344,8 @@ public class RequestHandler {
         }
         final GlobalConfiguration.TenantConfiguration tenantConfiguration = environmentConfiguration.getTenants().get(tenantId);
         if (isNull(tenantConfiguration)) {
-            String tenantConfigURL = String.format("%s/imperative-shell/environments/%s/tenants/%s/config.json", configRepositoryUrl, environmentName, tenantId);
-            GlobalConfiguration.TenantConfiguration tenantConfig = getTenantConfiguration(tenantConfigURL);
+            final String tenantConfigURL = String.format("%s/imperative-shell/environments/%s/tenants/%s/config.json", configRepositoryUrl, environmentName, tenantId);
+            final GlobalConfiguration.TenantConfiguration tenantConfig = getTenantConfiguration(tenantConfigURL);
             environmentConfiguration.getTenants().put(tenantId, tenantConfig);
         }
         return environmentConfiguration.getTenants().get(tenantId)
@@ -283,16 +416,16 @@ public class RequestHandler {
         if (isNull(tenantConfiguration)) {
             return Optional.empty();
         }
-        GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
+        final GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
         if (nonNull(routeConfiguration)) {
-            GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration functionConfiguration = routeConfiguration.getFunction();
+            final GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration functionConfiguration = routeConfiguration.getFunction();
             if (nonNull(functionConfiguration)) {
                 return Optional.of(getFunction(codeRepositoryUrl, functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
             }
         }
-        GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfigurationCatchAll = tenantConfiguration.getRoutes().get(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
+        final GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfigurationCatchAll = tenantConfiguration.getRoutes().get(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
         if (nonNull(routeConfigurationCatchAll)) {
-            GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration functionConfiguration = routeConfigurationCatchAll.getFunction();
+            final GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration functionConfiguration = routeConfigurationCatchAll.getFunction();
             if (nonNull(functionConfiguration)) {
                 return Optional.of(getFunction(codeRepositoryUrl, functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
             }
@@ -332,7 +465,7 @@ public class RequestHandler {
         if (isNull(tenantConfiguration)) {
             return Collections.emptyList();
         }
-        GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
+        final GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
         if (isNull(routeConfiguration)) {
             return Collections.emptyList();
         }
@@ -391,7 +524,7 @@ public class RequestHandler {
     }
 
     private BiConsumer<HttpServerRequest, HttpServerResponse> getPostFilter(String codeServerURL, GlobalConfiguration.PostFilterConfiguration configuration, String query) {
-        String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
+        final String resourceUrl = String.format("%s/%s-%s.jar", codeServerURL, configuration.getName(), configuration.getVersion());
         final String resourceKey = String.format("%s?%s", resourceUrl, query);
         try {
             final Object object = assets.createObject(resourceKey, configuration.getName(), configuration.getConfig());
