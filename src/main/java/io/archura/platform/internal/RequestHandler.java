@@ -55,6 +55,9 @@ public class RequestHandler {
                     globalConfiguration.getEnvironments(),
                     globalConfiguration.getConfig().getCodeRepositoryUrl()
             );
+            if (isNull(environmentName)) {
+                throw new RuntimeException("Could not find the environmentName, environment cannot be NULL");
+            }
 
             final String tenantId = runTenantPreFilters(
                     request,
@@ -64,6 +67,9 @@ public class RequestHandler {
                     globalConfiguration.getEnvironments(),
                     globalConfiguration.getConfig().getCodeRepositoryUrl()
             );
+            if (isNull(tenantId)) {
+                throw new RuntimeException("Could not find the tenantId, tenant cannot be NULL");
+            }
 
             final String routeId = runRoutePreFilters(
                     request,
@@ -72,6 +78,9 @@ public class RequestHandler {
                     environmentName,
                     tenantId, globalConfiguration.getEnvironments(), globalConfiguration.getConfig().getCodeRepositoryUrl()
             );
+            if (isNull(routeId)) {
+                throw new RuntimeException("Could not find the routeId, route cannot be NULL");
+            }
 
             final HttpServerResponse response = runRequestFunction(
                     request,
@@ -419,14 +428,18 @@ public class RequestHandler {
         final GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfiguration = tenantConfiguration.getRoutes().get(routeId);
         if (nonNull(routeConfiguration)) {
             final GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration functionConfiguration = routeConfiguration.getFunction();
-            if (nonNull(functionConfiguration)) {
+            if (nonNull(functionConfiguration)
+                    && nonNull(functionConfiguration.getName())
+                    && nonNull(functionConfiguration.getVersion())) {
                 return Optional.of(getFunction(codeRepositoryUrl, functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
             }
         }
         final GlobalConfiguration.TenantConfiguration.RouteConfiguration routeConfigurationCatchAll = tenantConfiguration.getRoutes().get(TenantKeys.CATCH_ALL_ROUTE_KEY.getKey());
         if (nonNull(routeConfigurationCatchAll)) {
             final GlobalConfiguration.TenantConfiguration.RouteConfiguration.FunctionConfiguration functionConfiguration = routeConfigurationCatchAll.getFunction();
-            if (nonNull(functionConfiguration)) {
+            if (nonNull(functionConfiguration)
+                    && nonNull(functionConfiguration.getName())
+                    && nonNull(functionConfiguration.getVersion())) {
                 return Optional.of(getFunction(codeRepositoryUrl, functionConfiguration, String.format("environmentName=%s&tenantId=%s", environmentName, tenantId)));
             }
         }

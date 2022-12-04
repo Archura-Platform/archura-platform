@@ -11,8 +11,10 @@ import io.archura.platform.internal.configuration.GlobalConfiguration;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
@@ -28,8 +30,10 @@ public class HttpServer implements Server {
             final ExecutorService executorService,
             final Assets assets
     ) throws IOException {
-        final GlobalConfiguration globalConfiguration = GlobalConfiguration.getInstance();
         final Logger logger = assets.getLogger(Collections.emptyMap());
+        logger.info("Starting java server %s".formatted(new Date()));
+        long start = System.currentTimeMillis();
+        final GlobalConfiguration globalConfiguration = GlobalConfiguration.getInstance();
         final InetSocketAddress serverAddress = new InetSocketAddress(globalConfiguration.getConfig().getHostname(), globalConfiguration.getConfig().getPort());
         localhost = com.sun.net.httpserver.HttpServer.create(serverAddress, globalConfiguration.getConfig().getBacklog());
         localhost.setExecutor(executorService);
@@ -44,7 +48,7 @@ public class HttpServer implements Server {
                         .requestMethod(exchange.getRequestMethod())
                         .requestHeaders(headers)
                         .requestBody(exchange.getRequestBody())
-                        .attributes(exchange.getHttpContext().getAttributes())
+                        .attributes(new ConcurrentHashMap<>(exchange.getHttpContext().getAttributes()))
                         .remoteAddress(exchange.getRemoteAddress())
                         .build();
                 final HttpServerResponse response = requestHandler.handle(httpRequest);
@@ -65,8 +69,8 @@ public class HttpServer implements Server {
             }
         });
         context.getFilters().add(new RequestFilter(globalConfiguration.getConfig().getRequestTimeout()));
-        logger.info("HTTP server started on: %s:%s", localhost.getAddress().getHostName(), localhost.getAddress().getPort());
         localhost.start();
+        logger.info("HTTP server started on: %s:%s in %s ms.", localhost.getAddress().getHostName(), localhost.getAddress().getPort(), System.currentTimeMillis() - start);
     }
 
     @Override

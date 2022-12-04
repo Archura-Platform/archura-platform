@@ -11,7 +11,7 @@ COPY target/ArchuraPlatformApplication-0.0.1-SNAPSHOT.jar ${APP_NAME}.jar
 EXPOSE 8080
 
 USER app
-ENTRYPOINT java -XX:MaxRAMPercentage=100 -XX:MinRAMPercentage=100 \
+ENTRYPOINT echo "Starting container "`date` && java -XX:MaxRAMPercentage=50 -XX:MinRAMPercentage=50 \
 -Djava.security.manager=io.archura.platform.securitymanager.ArchuraSecurityManager \
 --enable-preview --add-exports java.base/jdk.internal.reflect=ALL-UNNAMED \
 --add-opens java.base/java.security=ALL-UNNAMED \

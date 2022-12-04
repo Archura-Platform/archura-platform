@@ -10,6 +10,7 @@ import io.archura.platform.internal.server.Server;
 
 import java.io.IOException;
 import java.net.http.HttpClient;
+import java.util.Date;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadFactory;
@@ -17,6 +18,7 @@ import java.util.concurrent.ThreadFactory;
 public class ArchuraPlatformApplication {
 
     public static void main(String[] args) throws Exception {
+        System.out.println("Starting java application %s".formatted(new Date()));
         final ArchuraPlatformApplication application = new ArchuraPlatformApplication();
         application.start();
     }
